@@ -19,15 +19,19 @@ void sig_handler(int signum) {
 int main(void) {
     fd_set rfds;
     struct timeval tv;
-    int retval, uart_fd;
-    char buf[512];
+    int retval, uart_fd, len;
+    unsigned char buf[512];
     ssize_t avail;
     mavlink_status_t status;
     mavlink_message_t msg;
     // Create new termios struc, we call it 'tty' for convention
     struct termios tty;
+    int hb_count = 0;
 
     signal(SIGINT, sig_handler);
+
+    //gettimeofday(&tv, NULL);
+    //printf("gettimeofday %d\n", tv.tv_sec);
 
     uart_fd = open("/dev/ttyMSM1", O_RDWR);
 
@@ -72,10 +76,21 @@ int main(void) {
         retval = select(uart_fd + 1, &rfds, NULL, NULL, &tv);
         if (retval > 0) {
             avail = read(uart_fd, buf, 512);
-            printf("recv %d bytes\n", avail);
+            //printf("recv %d bytes\n", avail);
             for (int i = 0; i < avail; i++) {
                 if (mavlink_parse_char(0, buf[i], &msg, &status)) {
                     printf("recv msg ID %d, seq %d\n", msg.msgid, msg.seq);
+                    if (msg.msgid == 0) {
+                        hb_count++;
+                        if (hb_count > 5) {
+                            hb_count = 0;
+                            gettimeofday(&tv, NULL);
+                            //printf("gettimeofday %d\n", tv.tv_sec);
+                            mavlink_msg_system_time_pack(255, 1, &msg, tv.tv_sec * 1000000ULL + tv.tv_usec, 0);
+                            len = mavlink_msg_to_send_buffer(buf, &msg);
+                            write(uart_fd, buf, len);
+                        }
+                    }
                 }
             }
         }
