@@ -8,7 +8,12 @@
 #include <signal.h>
 #include <termios.h> // Contains POSIX terminal control definitions
 #include <errno.h> // Error integer and strerror() function
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #include "ardupilotmega/mavlink.h"
+
+#define MY_SERVER_IP "140.96.178.37"
 
 bool gogogo = true;
 
@@ -27,6 +32,9 @@ int main(void) {
     // Create new termios struc, we call it 'tty' for convention
     struct termios tty;
     int hb_count = 0;
+    int sock_fd, high_fd;
+    struct sockaddr_in server;
+    unsigned char tx_buf[512];
 
     signal(SIGINT, sig_handler);
 
@@ -64,34 +72,56 @@ int main(void) {
         return 1;
     }
 
+    if ((sock_fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+        return 1;
+    }
+
+    memset(&server, 0, sizeof(server));
+    /* Set up the server name */
+    server.sin_family      = AF_INET;            /* Internet Domain    */
+    server.sin_port        = htons(17500);               /* Server Port        */
+    server.sin_addr.s_addr = inet_addr(MY_SERVER_IP); /* Server's Address   */
+
+    high_fd = sock_fd;
+    if (uart_fd > high_fd) high_fd = uart_fd;
+
     printf("hello\n");
 
     while (gogogo) {
         FD_ZERO(&rfds);
         FD_SET(uart_fd, &rfds);
+        FD_SET(sock_fd, &rfds);
 
         tv.tv_sec = 10;
         tv.tv_usec = 0;
 
-        retval = select(uart_fd + 1, &rfds, NULL, NULL, &tv);
+        retval = select(high_fd + 1, &rfds, NULL, NULL, &tv);
         if (retval > 0) {
-            avail = read(uart_fd, buf, 512);
-            //printf("recv %d bytes\n", avail);
-            for (int i = 0; i < avail; i++) {
-                if (mavlink_parse_char(0, buf[i], &msg, &status)) {
-                    printf("recv msg ID %d, seq %d\n", msg.msgid, msg.seq);
-                    if (msg.msgid == 0) {
-                        hb_count++;
-                        if (hb_count > 5) {
-                            hb_count = 0;
-                            gettimeofday(&tv, NULL);
-                            //printf("gettimeofday %d\n", tv.tv_sec);
-                            mavlink_msg_system_time_pack(255, 1, &msg, tv.tv_sec * 1000000ULL + tv.tv_usec, 0);
-                            len = mavlink_msg_to_send_buffer(buf, &msg);
-                            write(uart_fd, buf, len);
+            if (FD_ISSET(uart_fd, &rfds)) {
+                avail = read(uart_fd, buf, 512);
+                //printf("recv %d bytes\n", avail);
+                for (int i = 0; i < avail; i++) {
+                    if (mavlink_parse_char(0, buf[i], &msg, &status)) {
+                        printf("recv msg ID %d, seq %d\n", msg.msgid, msg.seq);
+                        len = mavlink_msg_to_send_buffer(tx_buf, &msg);
+                        sendto(sock_fd, tx_buf, len, 0, (const struct sockaddr *)&server, sizeof(server));
+                        if (msg.msgid == 0) {
+                            hb_count++;
+                            if (hb_count > 5) {
+                                hb_count = 0;
+                                gettimeofday(&tv, NULL);
+                                //printf("gettimeofday %d\n", tv.tv_sec);
+                                mavlink_msg_system_time_pack(255, 1, &msg, tv.tv_sec * 1000000ULL + tv.tv_usec, 0);
+                                len = mavlink_msg_to_send_buffer(tx_buf, &msg);
+                                write(uart_fd, tx_buf, len);
+                            }
                         }
                     }
                 }
+            }
+            if (FD_ISSET(sock_fd, &rfds)) {
+                avail = read(sock_fd, buf, 512);
+                write(uart_fd, buf, avail);
             }
         }
     }
