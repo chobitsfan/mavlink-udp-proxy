@@ -13,15 +13,13 @@
 #include <netinet/in.h>
 #include "ardupilotmega/mavlink.h"
 
-#define MY_SERVER_IP "140.96.178.37"
-
 bool gogogo = true;
 
 void sig_handler(int signum) {
     gogogo = false;
 }
 
-int main(void) {
+int main(int argc, char *argv[]) {
     fd_set rfds;
     struct timeval tv;
     int retval, uart_fd, len;
@@ -79,8 +77,8 @@ int main(void) {
     memset(&server, 0, sizeof(server));
     /* Set up the server name */
     server.sin_family      = AF_INET;            /* Internet Domain    */
-    server.sin_port        = htons(17500);               /* Server Port        */
-    server.sin_addr.s_addr = inet_addr(MY_SERVER_IP); /* Server's Address   */
+    server.sin_port        = htons(atoi(argv[2]));               /* Server Port        */
+    server.sin_addr.s_addr = inet_addr(argv[1]); /* Server's Address   */
 
     high_fd = sock_fd;
     if (uart_fd > high_fd) high_fd = uart_fd;
