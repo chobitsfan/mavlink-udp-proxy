@@ -1,0 +1,2 @@
+#!/bin/bash
+arm-linux-gnueabihf-gcc -Wall -o mavlink_udp  mavlink_udp.c
