@@ -29,7 +29,7 @@ int main(int argc, char *argv[]) {
     mavlink_message_t msg;
     // Create new termios struc, we call it 'tty' for convention
     struct termios tty;
-    int hb_count = 0;
+    //int hb_count = 0;
     int sock_fd, high_fd;
     struct sockaddr_in server;
     unsigned char tx_buf[512];
@@ -103,7 +103,7 @@ int main(int argc, char *argv[]) {
                         printf("recv msg ID %d, seq %d\n", msg.msgid, msg.seq);
                         len = mavlink_msg_to_send_buffer(tx_buf, &msg);
                         sendto(sock_fd, tx_buf, len, 0, (const struct sockaddr *)&server, sizeof(server));
-                        if (msg.msgid == 0) {
+                        /*if (msg.msgid == 0) {
                             hb_count++;
                             if (hb_count > 5) {
                                 hb_count = 0;
@@ -113,7 +113,7 @@ int main(int argc, char *argv[]) {
                                 len = mavlink_msg_to_send_buffer(tx_buf, &msg);
                                 write(uart_fd, tx_buf, len);
                             }
-                        }
+                        }*/
                     }
                 }
             }
