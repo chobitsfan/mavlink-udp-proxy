@@ -119,7 +119,16 @@ int main(int argc, char *argv[]) {
             }
             if (FD_ISSET(sock_fd, &rfds)) {
                 avail = read(sock_fd, buf, 512);
-                write(uart_fd, buf, avail);
+                if (avail == 8 && buf[0] == 9 && buf[1] == 9 && buf[2] == 9 && buf[3] == 9 && buf[4] == 9) {
+                    printf("airplane mode\n");
+                    pid_t pid = fork();
+                    if (pid == 0) {
+                        execl("atcli", "atcli", "",  (char*)NULL);
+                        return 0;
+                    }
+                } else {
+                    write(uart_fd, buf, avail);
+                }
             }
         }
     }
