@@ -33,13 +33,15 @@ int main(int argc, char *argv[]) {
     int sock_fd, high_fd;
     struct sockaddr_in server;
     unsigned char tx_buf[512];
+    int mav_sysid = -1;
 
     signal(SIGINT, sig_handler);
+    signal(SIGTERM, sig_handler);
 
     //gettimeofday(&tv, NULL);
     //printf("gettimeofday %d\n", tv.tv_sec);
 
-    uart_fd = open("/dev/ttyMSM1", O_RDWR);
+    uart_fd = open("/dev/serial0", O_RDWR);
 
     if(tcgetattr(uart_fd, &tty) != 0) {
         printf("Error %i from tcgetattr: %s\n", errno, strerror(errno));
@@ -77,7 +79,7 @@ int main(int argc, char *argv[]) {
     memset(&server, 0, sizeof(server));
     /* Set up the server name */
     server.sin_family      = AF_INET;            /* Internet Domain    */
-    server.sin_port        = htons(atoi(argv[2]));               /* Server Port        */
+    //server.sin_port        = htons(atoi(argv[2]));               //Server Port
     server.sin_addr.s_addr = inet_addr(argv[1]); /* Server's Address   */
 
     high_fd = sock_fd;
@@ -100,7 +102,12 @@ int main(int argc, char *argv[]) {
                 //printf("recv %d bytes\n", avail);
                 for (int i = 0; i < avail; i++) {
                     if (mavlink_parse_char(0, buf[i], &msg, &status)) {
-                        printf("recv msg ID %d, seq %d\n", msg.msgid, msg.seq);
+                        //printf("recv msg ID %d, seq %d\n", msg.msgid, msg.seq);
+			if (msg.sysid != mav_sysid) {
+			    mav_sysid = msg.sysid;
+                            printf("found MAV %d\n", msg.sysid);
+                            server.sin_port = htons(19500 + mav_sysid);
+			}
                         len = mavlink_msg_to_send_buffer(tx_buf, &msg);
                         sendto(sock_fd, tx_buf, len, 0, (const struct sockaddr *)&server, sizeof(server));
                         /*if (msg.msgid == 0) {
