@@ -22,7 +22,8 @@ void sig_handler(int signum) {
 int main(int argc, char *argv[]) {
     fd_set rfds;
     struct timeval tv;
-    int retval, uart_fd, len;
+    int retval, uart_fd;
+    unsigned int len;
     unsigned char buf[512];
     ssize_t avail;
     mavlink_status_t status;
@@ -32,8 +33,10 @@ int main(int argc, char *argv[]) {
     //int hb_count = 0;
     int sock_fd, high_fd;
     struct sockaddr_in server;
+    struct sockaddr_in client;
     unsigned char tx_buf[512];
     int mav_sysid = -1;
+    bool gcs_connected = false;
 
     signal(SIGINT, sig_handler);
     signal(SIGTERM, sig_handler);
@@ -79,8 +82,13 @@ int main(int argc, char *argv[]) {
     memset(&server, 0, sizeof(server));
     /* Set up the server name */
     server.sin_family      = AF_INET;            /* Internet Domain    */
-    //server.sin_port        = htons(atoi(argv[2]));               //Server Port
-    server.sin_addr.s_addr = inet_addr(argv[1]); /* Server's Address   */
+    server.sin_port        = htons(17500);  //Server Port
+    server.sin_addr.s_addr = INADDR_ANY;
+
+    if (bind(sock_fd, (const struct sockaddr *)&server, sizeof(server)) < 0) {
+        printf("bind failed\n");
+        return 1;
+    }
 
     high_fd = sock_fd;
     if (uart_fd > high_fd) high_fd = uart_fd;
@@ -106,10 +114,12 @@ int main(int argc, char *argv[]) {
 			if (msg.sysid != mav_sysid) {
 			    mav_sysid = msg.sysid;
                             printf("found MAV %d\n", msg.sysid);
-                            server.sin_port = htons(19500 + mav_sysid);
+                            //server.sin_port = htons(19500 + mav_sysid);
 			}
-                        len = mavlink_msg_to_send_buffer(tx_buf, &msg);
-                        sendto(sock_fd, tx_buf, len, 0, (const struct sockaddr *)&server, sizeof(server));
+                        if (gcs_connected) {
+                            len = mavlink_msg_to_send_buffer(tx_buf, &msg);
+                            sendto(sock_fd, tx_buf, len, 0, (const struct sockaddr *)&client, sizeof(client));
+                        }
                         /*if (msg.msgid == 0) {
                             hb_count++;
                             if (hb_count > 5) {
@@ -125,15 +135,10 @@ int main(int argc, char *argv[]) {
                 }
             }
             if (FD_ISSET(sock_fd, &rfds)) {
-                avail = read(sock_fd, buf, 512);
-                if (avail == 8 && buf[0] == 9 && buf[1] == 9 && buf[2] == 9 && buf[3] == 9 && buf[4] == 9) {
-                    printf("airplane mode\n");
-                    pid_t pid = fork();
-                    if (pid == 0) {
-                        execl("atcli", "atcli", "",  (char*)NULL);
-                        return 0;
-                    }
-                } else {
+                len = sizeof(client);
+                avail = recvfrom(sock_fd, buf, 512, 0, (struct sockaddr*)&client, &len);
+                if (avail > 0) {
+		    gcs_connected = true;
                     write(uart_fd, buf, avail);
                 }
             }
