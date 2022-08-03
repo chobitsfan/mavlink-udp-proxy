@@ -11,6 +11,7 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <math.h>
 #include "ardupilotmega/mavlink.h"
 
 bool gogogo = true;
@@ -37,6 +38,7 @@ int main(int argc, char *argv[]) {
     unsigned char tx_buf[512];
     int mav_sysid = -1;
     bool gcs_connected = false;
+    int ipc_fd;
 
     signal(SIGINT, sig_handler);
     signal(SIGTERM, sig_handler);
@@ -45,6 +47,10 @@ int main(int argc, char *argv[]) {
     //printf("gettimeofday %d\n", tv.tv_sec);
 
     uart_fd = open("/dev/serial0", O_RDWR);
+    if (uart_fd < 0) {
+        printf("can not open serial port\n");
+        return 1;
+    }
 
     if(tcgetattr(uart_fd, &tty) != 0) {
         printf("Error %i from tcgetattr: %s\n", errno, strerror(errno));
@@ -78,20 +84,32 @@ int main(int argc, char *argv[]) {
     if ((sock_fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
         return 1;
     }
-
     memset(&server, 0, sizeof(server));
     /* Set up the server name */
     server.sin_family      = AF_INET;            /* Internet Domain    */
     server.sin_port        = htons(17500);  //Server Port
-    server.sin_addr.s_addr = INADDR_ANY;
-
+    server.sin_addr.s_addr = htonl(INADDR_ANY);
     if (bind(sock_fd, (const struct sockaddr *)&server, sizeof(server)) < 0) {
         printf("bind failed\n");
         return 1;
     }
 
+    if ((ipc_fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+        return 1;
+    }
+    memset(&server, 0, sizeof(server));
+    /* Set up the server name */
+    server.sin_family      = AF_INET;            /* Internet Domain    */
+    server.sin_port        = htons(17510);  //Server Port
+    server.sin_addr.s_addr = inet_addr("127.0.0.1");
+    if (bind(ipc_fd, (const struct sockaddr *)&server, sizeof(server)) < 0) {
+        printf("bind local failed\n");
+        return 1;
+    }
+
     high_fd = sock_fd;
     if (uart_fd > high_fd) high_fd = uart_fd;
+    if (ipc_fd > high_fd) high_fd = ipc_fd;
 
     printf("hello\n");
 
@@ -99,6 +117,7 @@ int main(int argc, char *argv[]) {
         FD_ZERO(&rfds);
         FD_SET(uart_fd, &rfds);
         FD_SET(sock_fd, &rfds);
+        FD_SET(ipc_fd, &rfds);
 
         tv.tv_sec = 10;
         tv.tv_usec = 0;
@@ -142,8 +161,23 @@ int main(int argc, char *argv[]) {
                     write(uart_fd, buf, avail);
                 }
             }
+            if (FD_ISSET(ipc_fd, &rfds)) {
+                double tag_pose[3];
+                if (recv(ipc_fd, tag_pose, sizeof(tag_pose), 0) == sizeof(tag_pose)) {
+                    //printf("%f %f %f\n", tag_pose[0], tag_pose[1], tag_pose[2]);
+                    gettimeofday(&tv, NULL);
+                    float q[4] = {1, 0, 0, 0};
+                    mavlink_msg_landing_target_pack(255, 0, &msg, tv.tv_sec*1000000+tv.tv_usec, 0, 0, 0, 0, sqrt(tag_pose[0]*tag_pose[0]+tag_pose[1]*tag_pose[1]+tag_pose[2]*tag_pose[2]), 0, 0, -tag_pose[1], tag_pose[0], tag_pose[2], q, 0, 1);
+                    len = mavlink_msg_to_send_buffer(buf, &msg);
+                    write(uart_fd, buf, len); 
+                }
+            }
         }
     }
+
+    close(uart_fd);
+    close(sock_fd);
+    close(ipc_fd);
 
     return 0;
 }
