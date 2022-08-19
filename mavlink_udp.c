@@ -123,7 +123,7 @@ int main(int argc, char *argv[]) {
                     printf("airplane mode\n");
                     pid_t pid = fork();
                     if (pid == 0) {
-                        execl("atcli", "atcli", "",  (char*)NULL);
+                        execl("/usr/bin/atcli", "atcli", "at+cfun=0",  (char*)NULL);
                         return 0;
                     }
                 } else {
