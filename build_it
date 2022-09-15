@@ -1,2 +1,2 @@
 #!/bin/bash
-gcc -Wall -O -lm -o mavlink_udp  mavlink_udp.c
+gcc -Wall -O1 -o mavlink_udp  mavlink_udp.c -lm
