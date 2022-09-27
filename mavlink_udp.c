@@ -12,7 +12,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <math.h>
-#include "ardupilotmega/mavlink.h"
+#include "mavlink/ardupilotmega/mavlink.h"
 
 bool gogogo = true;
 
