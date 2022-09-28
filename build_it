@@ -1,2 +1,2 @@
 #!/bin/bash
-gcc -Wno-address-of-packed-member -O1 -o mavlink_udp  mavlink_udp.c -lm
+gcc -Wall -Wno-address-of-packed-member -O1 -o mavlink_udp  mavlink_udp.c -lm

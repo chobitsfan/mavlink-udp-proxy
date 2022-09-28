@@ -5,7 +5,7 @@ After=multi-user.target
 
 [Service]
 Type=simple 
-ExecStart=/home/pi/src/mavlink-udp-proxy/mavlink_udp 192.168.0.111
+ExecStart=/home/pi/src/mavlink-udp-proxy/mavlink_udp
 Restart=always
 
 [Install]
