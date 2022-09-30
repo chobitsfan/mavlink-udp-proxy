@@ -40,6 +40,7 @@ int main(int argc, char *argv[]) {
     bool gcs_connected = false;
     int ipc_fd;
     int wait_rot = 0;
+    bool global_pos_rcvd = false;
 
     signal(SIGINT, sig_handler);
     signal(SIGTERM, sig_handler);
@@ -140,8 +141,13 @@ int main(int argc, char *argv[]) {
                             len = mavlink_msg_to_send_buffer(tx_buf, &msg);
                             sendto(sock_fd, tx_buf, len, 0, (const struct sockaddr *)&client, sizeof(client));
                         }
-                        /*if (msg.msgid == 0) {
-                            hb_count++;
+                        if (msg.msgid == MAVLINK_MSG_ID_HEARTBEAT) {
+                            if (!global_pos_rcvd) {
+                                mavlink_msg_command_long_pack(255, 0, &msg, 0, 0, MAV_CMD_SET_MESSAGE_INTERVAL, 0, MAVLINK_MSG_ID_GLOBAL_POSITION_INT, 1000000, 0, 0, 0, 0, 0);
+                                len = mavlink_msg_to_send_buffer(buf, &msg);
+                                write(uart_fd, buf, len);
+                            }
+                            /*hb_count++;
                             if (hb_count > 5) {
                                 hb_count = 0;
                                 gettimeofday(&tv, NULL);
@@ -149,8 +155,13 @@ int main(int argc, char *argv[]) {
                                 mavlink_msg_system_time_pack(255, 1, &msg, tv.tv_sec * 1000000ULL + tv.tv_usec, 0);
                                 len = mavlink_msg_to_send_buffer(tx_buf, &msg);
                                 write(uart_fd, tx_buf, len);
-                            }
-                        }*/
+                            }*/
+                        } else if (msg.msgid == MAVLINK_MSG_ID_GLOBAL_POSITION_INT) {
+                            global_pos_rcvd = true;
+                            mavlink_global_position_int_t global_pos_int;
+                            mavlink_msg_global_position_int_decode(&msg, &global_pos_int);
+                            printf("%d\n", global_pos_int.relative_alt);
+                        }
                     }
                 }
             }
@@ -172,11 +183,11 @@ int main(int argc, char *argv[]) {
                         if (abs_yaw_offset > 10) {
                             wait_rot = 60;
                             if (yaw_offset > 0) {
-                                mavlink_msg_command_long_pack(255, 0, &msg, 0, 0, 115, 0, abs_yaw_offset, 30, 1, 1, 0, 0, 0);
+                                mavlink_msg_command_long_pack(255, 0, &msg, 0, 0, MAV_CMD_CONDITION_YAW, 0, abs_yaw_offset, 30, 1, 1, 0, 0, 0);
                                 len = mavlink_msg_to_send_buffer(buf, &msg);
                                 write(uart_fd, buf, len); 
                             } else {
-                                mavlink_msg_command_long_pack(255, 0, &msg, 0, 0, 115, 0, abs_yaw_offset, 30, -1, 1, 0, 0, 0);
+                                mavlink_msg_command_long_pack(255, 0, &msg, 0, 0, MAV_CMD_CONDITION_YAW, 0, abs_yaw_offset, 30, -1, 1, 0, 0, 0);
                                 len = mavlink_msg_to_send_buffer(buf, &msg);
                                 write(uart_fd, buf, len); 
                             }
