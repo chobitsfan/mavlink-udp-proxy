@@ -12,6 +12,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <math.h>
+#include <sys/wait.h>
 #include "mavlink/ardupilotmega/mavlink.h"
 
 bool gogogo = true;
@@ -43,6 +44,7 @@ int main(int argc, char *argv[]) {
     float relative_alt_m = 10;
     bool wait_guided = false;
     bool wait_arm = false;
+    pid_t tgt_proc = -1;
 
     signal(SIGINT, sig_handler);
     signal(SIGTERM, sig_handler);
@@ -138,6 +140,7 @@ int main(int argc, char *argv[]) {
                 //printf("recv %d bytes\n", avail);
                 for (int i = 0; i < avail; i++) {
                     if (mavlink_parse_char(0, buf[i], &msg, &status)) {
+                        if (msg.sysid == 255) continue;
                         //printf("recv msg ID %d, seq %d\n", msg.msgid, msg.seq);
 			if (msg.sysid != mav_sysid) {
 			    mav_sysid = msg.sysid;
@@ -170,6 +173,21 @@ int main(int argc, char *argv[]) {
                                     mavlink_msg_command_long_pack(255, 0, &msg, 0, 0, MAV_CMD_NAV_TAKEOFF, 0, 0, 0, 0, 0, 0, 0, 5);
                                     len = mavlink_msg_to_send_buffer(buf, &msg);
                                     write(uart_fd, buf, len);
+                                }
+                            }
+                            if (hb.custom_mode == COPTER_MODE_LAND || hb.custom_mode == COPTER_MODE_RTL) {
+                                if (tgt_proc < 0) {
+                                    printf("start apriltag_plnd\n");
+                                    tgt_proc = fork();
+                                    if (tgt_proc == 0) {
+                                        execl("/home/pi/src/apriltag_plnd/apriltag_plnd","/home/pi/src/apriltag_plnd/apriltag_plnd",(char*)NULL);
+                                    }
+                                }
+                            } else {
+                                if (tgt_proc > 0) {
+                                   printf("kill apriltag_plnd\n");
+                                   kill(tgt_proc, SIGINT);
+                                   if (waitpid(tgt_proc, NULL, WNOHANG) == tgt_proc) tgt_proc = -1;
                                 }
                             }
                             /*hb_count++;
@@ -263,6 +281,9 @@ int main(int argc, char *argv[]) {
     close(uart_fd);
     close(sock_fd);
     close(ipc_fd);
-
+    if (tgt_proc > 0) {
+        kill(SIGINT, tgt_proc);
+        wait(NULL);
+    }
     return 0;
 }
