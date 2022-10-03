@@ -41,6 +41,8 @@ int main(int argc, char *argv[]) {
     int wait_rot = 0;
     bool global_pos_rcvd = false;
     float relative_alt_m = 10;
+    bool wait_guided = false;
+    bool wait_arm = false;
 
     signal(SIGINT, sig_handler);
     signal(SIGTERM, sig_handler);
@@ -148,9 +150,27 @@ int main(int argc, char *argv[]) {
                         //}
                         if (msg.msgid == MAVLINK_MSG_ID_HEARTBEAT) {
                             if (!global_pos_rcvd) {
-                                mavlink_msg_command_long_pack(255, 0, &msg, 0, 0, MAV_CMD_SET_MESSAGE_INTERVAL, 0, MAVLINK_MSG_ID_GLOBAL_POSITION_INT, 1000000, 0, 0, 0, 0, 0);
+                                mavlink_msg_command_long_pack(255, 0, &msg, 0, 0, MAV_CMD_SET_MESSAGE_INTERVAL, 0, MAVLINK_MSG_ID_GLOBAL_POSITION_INT, 2000000, 0, 0, 0, 0, 0);
                                 len = mavlink_msg_to_send_buffer(buf, &msg);
                                 write(uart_fd, buf, len);
+                            }
+                            mavlink_heartbeat_t hb;
+                            mavlink_msg_heartbeat_decode(&msg, &hb);
+                            if (wait_guided) {
+                                wait_guided = false;
+                                if (hb.custom_mode == COPTER_MODE_GUIDED) {
+                                    mavlink_msg_command_long_pack(255, 0, &msg, 0, 0, MAV_CMD_COMPONENT_ARM_DISARM, 0, 1, 0, 0, 0, 0, 0, 0);
+                                    len = mavlink_msg_to_send_buffer(buf, &msg);
+                                    write(uart_fd, buf, len);
+                                    wait_arm = true;
+                                }
+                            } else if (wait_arm) {
+                                wait_arm = false;
+                                if (hb.base_mode & 128) {
+                                    mavlink_msg_command_long_pack(255, 0, &msg, 0, 0, MAV_CMD_NAV_TAKEOFF, 0, 0, 0, 0, 0, 0, 0, 5);
+                                    len = mavlink_msg_to_send_buffer(buf, &msg);
+                                    write(uart_fd, buf, len);
+                                }
                             }
                             /*hb_count++;
                             if (hb_count > 5) {
@@ -184,23 +204,34 @@ int main(int argc, char *argv[]) {
                 }*/
                 avail = recv(sock_fd, buf, sizeof(buf), 0);
                 if (avail > 0) {
-                    if (buf[0] == '2') {
-                       double lat, lon;
-                       retval = sscanf((char*)buf+2, "%lf,%lf", &lon, &lat);
-                       if (retval == 2) {
-                           //printf("recv %f,%f from cv2x\n", lon, lat);
-                           gettimeofday(&tv, NULL);
-                           mavlink_msg_set_position_target_global_int_pack(255, 0, &msg, tv.tv_sec*1000+(uint32_t)(tv.tv_usec*0.001), 0, 0, MAV_FRAME_GLOBAL_RELATIVE_ALT_INT, 3576, lat*1e7, lon*1e7, relative_alt_m, 0, 0, 0, 0, 0, 0, 0, 0);
-                           len = mavlink_msg_to_send_buffer(buf, &msg);
-                           write(uart_fd, buf, len);
-                       }
+                    if (buf[0] == '2' && buf[1] == ',') {
+                        double lat, lon;
+                        retval = sscanf((char*)buf+2, "%lf,%lf", &lon, &lat);
+                        if (retval == 2) {
+                            //printf("recv %f,%f from cv2x\n", lon, lat);
+                            gettimeofday(&tv, NULL);
+                            mavlink_msg_set_position_target_global_int_pack(255, 0, &msg, tv.tv_sec*1000+(uint32_t)(tv.tv_usec*0.001), 0, 0, MAV_FRAME_GLOBAL_RELATIVE_ALT_INT, 3576, lat*1e7, lon*1e7, relative_alt_m, 0, 0, 0, 0, 0, 0, 0, 0);
+                            len = mavlink_msg_to_send_buffer(buf, &msg);
+                            write(uart_fd, buf, len);
+                        }
+                    } else if (buf[0] == '3' && buf[1] == ',') {
+                        if (buf[2] == 1) {
+                            mavlink_msg_command_long_pack(255, 0, &msg, 0, 0, MAV_CMD_DO_SET_MODE, 1, COPTER_MODE_GUIDED, 0, 0, 0, 0, 0, 0);
+                            len = mavlink_msg_to_send_buffer(buf, &msg);
+                            write(uart_fd, buf, len);
+                            wait_guided = true;
+                        } else if (buf[2] == 2) {
+                            mavlink_msg_command_long_pack(255, 0, &msg, 0, 0, MAV_CMD_DO_SET_MODE, 1, COPTER_MODE_LAND, 0, 0, 0, 0, 0, 0);
+                            len = mavlink_msg_to_send_buffer(buf, &msg);
+                            write(uart_fd, buf, len);
+                        }
                     }
                 }
             }
             if (FD_ISSET(ipc_fd, &rfds)) {
                 double tag_pose[5] = {0};
                 if (recv(ipc_fd, tag_pose, sizeof(tag_pose), 0) > 0) {
-                    if ((tag_pose[2] < 4) && (tag_pose[3] != 0) && (wait_rot == 0)) {
+                    if (tag_pose[2] < 4 && tag_pose[3] != 0 && wait_rot == 0) {
                         float yaw_offset = atan2(tag_pose[3], tag_pose[4])*(180/M_PI);
                         //printf("yaw %f\n", yaw_offset);
                         float abs_yaw_offset = fabsf(yaw_offset);
