@@ -34,13 +34,13 @@ int main(int argc, char *argv[]) {
     //int hb_count = 0;
     int sock_fd, high_fd;
     struct sockaddr_in server;
-    struct sockaddr_in client;
-    unsigned char tx_buf[512];
+    struct sockaddr_in to_cv2x;
+    char tx_buf[512];
     int mav_sysid = -1;
-    bool gcs_connected = false;
     int ipc_fd;
     int wait_rot = 0;
     bool global_pos_rcvd = false;
+    float relative_alt_m = 10;
 
     signal(SIGINT, sig_handler);
     signal(SIGTERM, sig_handler);
@@ -89,7 +89,7 @@ int main(int argc, char *argv[]) {
     memset(&server, 0, sizeof(server));
     /* Set up the server name */
     server.sin_family      = AF_INET;            /* Internet Domain    */
-    server.sin_port        = htons(17500);  //Server Port
+    server.sin_port        = htons(5519);  //Server Port
     server.sin_addr.s_addr = htonl(INADDR_ANY);
     if (bind(sock_fd, (const struct sockaddr *)&server, sizeof(server)) < 0) {
         printf("bind failed\n");
@@ -108,6 +108,11 @@ int main(int argc, char *argv[]) {
         printf("bind local failed\n");
         return 1;
     }
+
+    memset(&to_cv2x, 0, sizeof(to_cv2x));
+    to_cv2x.sin_family = AF_INET;
+    to_cv2x.sin_port = htons(5555);
+    to_cv2x.sin_addr.s_addr = inet_addr("192.168.1.100");
 
     high_fd = sock_fd;
     if (uart_fd > high_fd) high_fd = uart_fd;
@@ -137,10 +142,10 @@ int main(int argc, char *argv[]) {
                             printf("found MAV %d\n", msg.sysid);
                             //server.sin_port = htons(19500 + mav_sysid);
 			}
-                        if (gcs_connected) {
-                            len = mavlink_msg_to_send_buffer(tx_buf, &msg);
-                            sendto(sock_fd, tx_buf, len, 0, (const struct sockaddr *)&client, sizeof(client));
-                        }
+                        //if (gcs_connected) {
+                        //    len = mavlink_msg_to_send_buffer(tx_buf, &msg);
+                        //    sendto(sock_fd, tx_buf, len, 0, (const struct sockaddr *)&client, sizeof(client));
+                        //}
                         if (msg.msgid == MAVLINK_MSG_ID_HEARTBEAT) {
                             if (!global_pos_rcvd) {
                                 mavlink_msg_command_long_pack(255, 0, &msg, 0, 0, MAV_CMD_SET_MESSAGE_INTERVAL, 0, MAVLINK_MSG_ID_GLOBAL_POSITION_INT, 1000000, 0, 0, 0, 0, 0);
@@ -160,17 +165,36 @@ int main(int argc, char *argv[]) {
                             global_pos_rcvd = true;
                             mavlink_global_position_int_t global_pos_int;
                             mavlink_msg_global_position_int_decode(&msg, &global_pos_int);
-                            printf("%d\n", global_pos_int.relative_alt);
+                            //printf("%d\n", global_pos_int.relative_alt);
+                            relative_alt_m = global_pos_int.relative_alt * 0.001f;
+                            len = snprintf(tx_buf, sizeof(tx_buf), "1,%.7f,%.7f", global_pos_int.lon*1e-7, global_pos_int.lat*1e-7);
+                            sendto(sock_fd, tx_buf, len, 0, (struct sockaddr*)&to_cv2x, sizeof(to_cv2x));
+                            //printf(tx_buf);
+                            //printf("\n");
                         }
                     }
                 }
             }
             if (FD_ISSET(sock_fd, &rfds)) {
-                len = sizeof(client);
+                /*len = sizeof(client);
                 avail = recvfrom(sock_fd, buf, 512, 0, (struct sockaddr*)&client, &len);
                 if (avail > 0) {
 		    gcs_connected = true;
                     write(uart_fd, buf, avail);
+                }*/
+                avail = recv(sock_fd, buf, sizeof(buf), 0);
+                if (avail > 0) {
+                    if (buf[0] == '2') {
+                       double lat, lon;
+                       retval = sscanf((char*)buf+2, "%lf,%lf", &lon, &lat);
+                       if (retval == 2) {
+                           //printf("recv %f,%f from cv2x\n", lon, lat);
+                           gettimeofday(&tv, NULL);
+                           mavlink_msg_set_position_target_global_int_pack(255, 0, &msg, tv.tv_sec*1000+(uint32_t)(tv.tv_usec*0.001), 0, 0, MAV_FRAME_GLOBAL_RELATIVE_ALT_INT, 3576, lat*1e7, lon*1e7, relative_alt_m, 0, 0, 0, 0, 0, 0, 0, 0);
+                           len = mavlink_msg_to_send_buffer(buf, &msg);
+                           write(uart_fd, buf, len);
+                       }
+                    }
                 }
             }
             if (FD_ISSET(ipc_fd, &rfds)) {
