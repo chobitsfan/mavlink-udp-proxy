@@ -169,11 +169,11 @@ int main(int argc, char *argv[]) {
                                 }
                             } else if (wait_arm) {
                                 wait_arm = false;
-                                if (hb.base_mode & 128) {
+                                /*if (hb.base_mode & 128) {
                                     mavlink_msg_command_long_pack(255, 0, &msg, 0, 0, MAV_CMD_NAV_TAKEOFF, 0, 0, 0, 0, 0, 0, 0, 5);
                                     len = mavlink_msg_to_send_buffer(buf, &msg);
                                     write(uart_fd, buf, len);
-                                }
+                                }*/
                             }
                             if (hb.custom_mode == COPTER_MODE_LAND || hb.custom_mode == COPTER_MODE_RTL) {
                                 if (tgt_proc < 0) {
@@ -222,6 +222,8 @@ int main(int argc, char *argv[]) {
                 }*/
                 avail = recv(sock_fd, buf, sizeof(buf), 0);
                 if (avail > 0) {
+                    buf[avail]=0;
+                    printf("rcv [%s] from cv2x\n", buf);
                     if (buf[0] == '2' && buf[1] == ',') {
                         double lat, lon;
                         retval = sscanf((char*)buf+2, "%lf,%lf", &lon, &lat);
@@ -233,13 +235,14 @@ int main(int argc, char *argv[]) {
                             write(uart_fd, buf, len);
                         }
                     } else if (buf[0] == '3' && buf[1] == ',') {
-                        if (buf[2] == 1) {
-                            mavlink_msg_command_long_pack(255, 0, &msg, 0, 0, MAV_CMD_DO_SET_MODE, 1, COPTER_MODE_GUIDED, 0, 0, 0, 0, 0, 0);
+                        if (buf[2] == '1') {
+                            printf("set mav to guided\n");
+                            mavlink_msg_command_long_pack(255, 0, &msg, 0, 0, MAV_CMD_DO_SET_MODE, 0, 1, COPTER_MODE_GUIDED, 0, 0, 0, 0, 0);
                             len = mavlink_msg_to_send_buffer(buf, &msg);
                             write(uart_fd, buf, len);
                             wait_guided = true;
-                        } else if (buf[2] == 2) {
-                            mavlink_msg_command_long_pack(255, 0, &msg, 0, 0, MAV_CMD_DO_SET_MODE, 1, COPTER_MODE_LAND, 0, 0, 0, 0, 0, 0);
+                        } else if (buf[2] == '2') {
+                            mavlink_msg_command_long_pack(255, 0, &msg, 0, 0, MAV_CMD_DO_SET_MODE, 0, 1, COPTER_MODE_LAND, 0, 0, 0, 0, 0);
                             len = mavlink_msg_to_send_buffer(buf, &msg);
                             write(uart_fd, buf, len);
                         }
