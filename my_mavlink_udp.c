@@ -250,7 +250,7 @@ int main(int argc, char *argv[]) {
                 }
             }
             if (FD_ISSET(ipc_fd, &rfds)) {
-                double tag_pose[5] = {0};
+                double tag_pose[6] = {0};
                 if (recv(ipc_fd, tag_pose, sizeof(tag_pose), 0) > 0) {
                     if (tag_pose[2] < 4 && tag_pose[3] != 0 && wait_rot == 0) {
                         float yaw_offset = atan2(tag_pose[3], tag_pose[4])*(180/M_PI);
@@ -271,7 +271,7 @@ int main(int argc, char *argv[]) {
                     } else {
                         gettimeofday(&tv, NULL);
                         float q[4] = {1, 0, 0, 0};
-                        mavlink_msg_landing_target_pack(255, 0, &msg, tv.tv_sec*1000000+tv.tv_usec, 0, 12, 0, 0, sqrt(tag_pose[0]*tag_pose[0]+tag_pose[1]*tag_pose[1]+tag_pose[2]*tag_pose[2]), 0, 0, -tag_pose[1], tag_pose[0], tag_pose[2], q, 0, 1);
+                        mavlink_msg_landing_target_pack(255, 0, &msg, tv.tv_sec*1000000+tv.tv_usec, tag_pose[5], MAV_FRAME_BODY_FRD, 0, 0, sqrt(tag_pose[0]*tag_pose[0]+tag_pose[1]*tag_pose[1]+tag_pose[2]*tag_pose[2]), 0, 0, -tag_pose[1], tag_pose[0], tag_pose[2], q, 0, 1);
                         len = mavlink_msg_to_send_buffer(buf, &msg);
                         write(uart_fd, buf, len); 
                     }
