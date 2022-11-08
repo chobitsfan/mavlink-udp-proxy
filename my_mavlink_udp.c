@@ -15,6 +15,8 @@
 #include <sys/wait.h>
 #include "mavlink/ardupilotmega/mavlink.h"
 
+#define MY_COMP_ID 191
+
 bool gogogo = true;
 
 void sig_handler(int signum) {
@@ -37,7 +39,7 @@ int main(int argc, char *argv[]) {
     struct sockaddr_in server;
     struct sockaddr_in to_cv2x;
     char tx_buf[512];
-    int mav_sysid = -1;
+    uint8_t mav_sysid = 0;
     int ipc_fd;
     int wait_rot = 0;
     bool global_pos_rcvd = false;
@@ -142,18 +144,18 @@ int main(int argc, char *argv[]) {
                     if (mavlink_parse_char(0, buf[i], &msg, &status)) {
                         if (msg.sysid == 255) continue;
                         //printf("recv msg ID %d, seq %d\n", msg.msgid, msg.seq);
-			if (msg.sysid != mav_sysid) {
-			    mav_sysid = msg.sysid;
-                            printf("found MAV %d\n", msg.sysid);
-                            //server.sin_port = htons(19500 + mav_sysid);
-			}
+						if (msg.sysid != mav_sysid) {
+							mav_sysid = msg.sysid;
+							printf("found MAV %d\n", msg.sysid);
+							//server.sin_port = htons(19500 + mav_sysid);
+						}
                         //if (gcs_connected) {
                         //    len = mavlink_msg_to_send_buffer(tx_buf, &msg);
                         //    sendto(sock_fd, tx_buf, len, 0, (const struct sockaddr *)&client, sizeof(client));
                         //}
                         if (msg.msgid == MAVLINK_MSG_ID_HEARTBEAT) {
                             if (!global_pos_rcvd) {
-                                mavlink_msg_command_long_pack(255, 0, &msg, 0, 0, MAV_CMD_SET_MESSAGE_INTERVAL, 0, MAVLINK_MSG_ID_GLOBAL_POSITION_INT, 2000000, 0, 0, 0, 0, 0);
+                                mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, 0, 0, MAV_CMD_SET_MESSAGE_INTERVAL, 0, MAVLINK_MSG_ID_GLOBAL_POSITION_INT, 2000000, 0, 0, 0, 0, 0);
                                 len = mavlink_msg_to_send_buffer(buf, &msg);
                                 write(uart_fd, buf, len);
                             }
@@ -162,18 +164,18 @@ int main(int argc, char *argv[]) {
                             if (wait_guided) {
                                 wait_guided = false;
                                 if (hb.custom_mode == COPTER_MODE_GUIDED) {
-                                    mavlink_msg_command_long_pack(255, 0, &msg, 0, 0, MAV_CMD_COMPONENT_ARM_DISARM, 0, 1, 0, 0, 0, 0, 0, 0);
+                                    mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, 0, 0, MAV_CMD_COMPONENT_ARM_DISARM, 0, 1, 0, 0, 0, 0, 0, 0);
                                     len = mavlink_msg_to_send_buffer(buf, &msg);
                                     write(uart_fd, buf, len);
                                     wait_arm = true;
                                 }
                             } else if (wait_arm) {
                                 wait_arm = false;
-                                /*if (hb.base_mode & 128) {
-                                    mavlink_msg_command_long_pack(255, 0, &msg, 0, 0, MAV_CMD_NAV_TAKEOFF, 0, 0, 0, 0, 0, 0, 0, 5);
+                                if (hb.base_mode & 128) {
+                                    mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, 0, 0, MAV_CMD_NAV_TAKEOFF, 0, 0, 0, 0, 0, 0, 0, 5);
                                     len = mavlink_msg_to_send_buffer(buf, &msg);
                                     write(uart_fd, buf, len);
-                                }*/
+                                }
                             }
                             if (hb.custom_mode == COPTER_MODE_LAND || hb.custom_mode == COPTER_MODE_RTL) {
                                 if (tgt_proc < 0) {
@@ -228,21 +230,22 @@ int main(int argc, char *argv[]) {
                         double lat, lon;
                         retval = sscanf((char*)buf+2, "%lf,%lf", &lon, &lat);
                         if (retval == 2) {
-                            //printf("recv %f,%f from cv2x\n", lon, lat);
+                            printf("recv %f,%f from cv2x\n", lon, lat);
                             gettimeofday(&tv, NULL);
-                            mavlink_msg_set_position_target_global_int_pack(255, 0, &msg, tv.tv_sec*1000+(uint32_t)(tv.tv_usec*0.001), 0, 0, MAV_FRAME_GLOBAL_RELATIVE_ALT_INT, 3576, lat*1e7, lon*1e7, relative_alt_m, 0, 0, 0, 0, 0, 0, 0, 0);
+                            mavlink_msg_set_position_target_global_int_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+(uint32_t)(tv.tv_usec*0.001), 0, 0, MAV_FRAME_GLOBAL_RELATIVE_ALT_INT, 3576, lat*1e7, lon*1e7, relative_alt_m, 0, 0, 0, 0, 0, 0, 0, 0);
                             len = mavlink_msg_to_send_buffer(buf, &msg);
                             write(uart_fd, buf, len);
+                            printf("cmd mav %d %d %f\n", (int)(lat*1e7), (int)(lon*1e7), relative_alt_m);
                         }
                     } else if (buf[0] == '3' && buf[1] == ',') {
                         if (buf[2] == '1') {
                             printf("set mav to guided\n");
-                            mavlink_msg_command_long_pack(255, 0, &msg, 0, 0, MAV_CMD_DO_SET_MODE, 0, 1, COPTER_MODE_GUIDED, 0, 0, 0, 0, 0);
+                            mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, 0, 0, MAV_CMD_DO_SET_MODE, 0, 1, COPTER_MODE_GUIDED, 0, 0, 0, 0, 0);
                             len = mavlink_msg_to_send_buffer(buf, &msg);
                             write(uart_fd, buf, len);
                             wait_guided = true;
                         } else if (buf[2] == '2') {
-                            mavlink_msg_command_long_pack(255, 0, &msg, 0, 0, MAV_CMD_DO_SET_MODE, 0, 1, COPTER_MODE_LAND, 0, 0, 0, 0, 0);
+                            mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, 0, 0, MAV_CMD_DO_SET_MODE, 0, 1, COPTER_MODE_LAND, 0, 0, 0, 0, 0);
                             len = mavlink_msg_to_send_buffer(buf, &msg);
                             write(uart_fd, buf, len);
                         }
@@ -259,11 +262,11 @@ int main(int argc, char *argv[]) {
                         if (abs_yaw_offset > 10) {
                             wait_rot = 60;
                             if (yaw_offset > 0) {
-                                mavlink_msg_command_long_pack(255, 0, &msg, 0, 0, MAV_CMD_CONDITION_YAW, 0, abs_yaw_offset, 30, 1, 1, 0, 0, 0);
+                                mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, 0, 0, MAV_CMD_CONDITION_YAW, 0, abs_yaw_offset, 30, 1, 1, 0, 0, 0);
                                 len = mavlink_msg_to_send_buffer(buf, &msg);
                                 write(uart_fd, buf, len); 
                             } else {
-                                mavlink_msg_command_long_pack(255, 0, &msg, 0, 0, MAV_CMD_CONDITION_YAW, 0, abs_yaw_offset, 30, -1, 1, 0, 0, 0);
+                                mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, 0, 0, MAV_CMD_CONDITION_YAW, 0, abs_yaw_offset, 30, -1, 1, 0, 0, 0);
                                 len = mavlink_msg_to_send_buffer(buf, &msg);
                                 write(uart_fd, buf, len); 
                             }
@@ -271,7 +274,7 @@ int main(int argc, char *argv[]) {
                     } else {
                         gettimeofday(&tv, NULL);
                         float q[4] = {1, 0, 0, 0};
-                        mavlink_msg_landing_target_pack(255, 0, &msg, tv.tv_sec*1000000+tv.tv_usec, tag_pose[5], MAV_FRAME_BODY_FRD, 0, 0, sqrt(tag_pose[0]*tag_pose[0]+tag_pose[1]*tag_pose[1]+tag_pose[2]*tag_pose[2]), 0, 0, -tag_pose[1], tag_pose[0], tag_pose[2], q, 0, 1);
+                        mavlink_msg_landing_target_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000000+tv.tv_usec, tag_pose[5], MAV_FRAME_BODY_FRD, 0, 0, sqrt(tag_pose[0]*tag_pose[0]+tag_pose[1]*tag_pose[1]+tag_pose[2]*tag_pose[2]), 0, 0, -tag_pose[1], tag_pose[0], tag_pose[2], q, 0, 1);
                         len = mavlink_msg_to_send_buffer(buf, &msg);
                         write(uart_fd, buf, len); 
                     }
