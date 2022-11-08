@@ -236,6 +236,11 @@ int main(int argc, char *argv[]) {
                             len = mavlink_msg_to_send_buffer(buf, &msg);
                             write(uart_fd, buf, len);
                             printf("cmd mav %d %d %f\n", (int)(lat*1e7), (int)(lon*1e7), relative_alt_m);
+                            char str_buf[50];
+                            sprintf(str_buf, "cv2x tgt %.2f %.2f", lon, lat);
+                            mavlink_msg_statustext_pack(mav_sysid, MY_COMP_ID, &msg, MAV_SEVERITY_INFO, str_buf, 0, 0);
+                            len = mavlink_msg_to_send_buffer(buf, &msg);
+                            write(uart_fd, buf, len);
                         }
                     } else if (buf[0] == '3' && buf[1] == ',') {
                         if (buf[2] == '1') {
@@ -244,8 +249,14 @@ int main(int argc, char *argv[]) {
                             len = mavlink_msg_to_send_buffer(buf, &msg);
                             write(uart_fd, buf, len);
                             wait_guided = true;
+                            mavlink_msg_statustext_pack(mav_sysid, MY_COMP_ID, &msg, MAV_SEVERITY_INFO, "cv2x takeoff", 0, 0);
+                            len = mavlink_msg_to_send_buffer(buf, &msg);
+                            write(uart_fd, buf, len);
                         } else if (buf[2] == '2') {
                             mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, 0, 0, MAV_CMD_DO_SET_MODE, 0, 1, COPTER_MODE_LAND, 0, 0, 0, 0, 0);
+                            len = mavlink_msg_to_send_buffer(buf, &msg);
+                            write(uart_fd, buf, len);
+                            mavlink_msg_statustext_pack(mav_sysid, MY_COMP_ID, &msg, MAV_SEVERITY_INFO, "cv2x land", 0, 0);
                             len = mavlink_msg_to_send_buffer(buf, &msg);
                             write(uart_fd, buf, len);
                         }
