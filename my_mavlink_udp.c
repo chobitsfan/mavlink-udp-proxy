@@ -267,6 +267,7 @@ int main(int argc, char *argv[]) {
                 double tag_pose[6] = {0};
                 if (recv(ipc_fd, tag_pose, sizeof(tag_pose), 0) > 0) {
                     if (tag_pose[2] < 4 && tag_pose[3] != 0 && wait_rot == 0) {
+			//calc yaw from rotation matrix, https://stackoverflow.com/questions/15022630/how-to-calculate-the-angle-from-rotation-matrix
                         float yaw_offset = atan2(tag_pose[3], tag_pose[4])*(180/M_PI);
                         //printf("yaw %f\n", yaw_offset);
                         float abs_yaw_offset = fabsf(yaw_offset);
