@@ -47,6 +47,7 @@ int main(int argc, char *argv[]) {
     bool wait_guided = false;
     bool wait_arm = false;
     pid_t tgt_proc = -1;
+    bool landing = false;
 
     signal(SIGINT, sig_handler);
     signal(SIGTERM, sig_handler);
@@ -177,7 +178,18 @@ int main(int argc, char *argv[]) {
                                     write(uart_fd, buf, len);
                                 }
                             }
+                            if (hb.base_mode & 128) {
+                                landing = false;
+                            } else if (landing) {
+                                landing = false;
+                                tx_buf[0]='4';
+                                tx_buf[1]=',';
+                                tx_buf[2]='1';
+                                tx_buf[3]=0;
+                                sendto(sock_fd, tx_buf, 4, 0, (struct sockaddr*)&to_cv2x, sizeof(to_cv2x));
+                            }
                             if (hb.custom_mode == COPTER_MODE_LAND || hb.custom_mode == COPTER_MODE_RTL) {
+                                landing = true;
                                 if (tgt_proc < 0) {
                                     printf("start apriltag_plnd\n");
                                     tgt_proc = fork();
