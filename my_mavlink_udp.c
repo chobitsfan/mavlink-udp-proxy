@@ -16,6 +16,7 @@
 #include "mavlink/ardupilotmega/mavlink.h"
 
 #define MY_COMP_ID 191
+#define TAKEOFF_ALT_M 15
 
 bool gogogo = true;
 
@@ -173,7 +174,7 @@ int main(int argc, char *argv[]) {
                             } else if (wait_arm) {
                                 wait_arm = false;
                                 if (hb.base_mode & 128) {
-                                    mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, 0, 0, MAV_CMD_NAV_TAKEOFF, 0, 0, 0, 0, 0, 0, 0, 15);
+                                    mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, 0, 0, MAV_CMD_NAV_TAKEOFF, 0, 0, 0, 0, 0, 0, 0, TAKEOFF_ALT_M);
                                     len = mavlink_msg_to_send_buffer(buf, &msg);
                                     write(uart_fd, buf, len);
                                 }
@@ -245,16 +246,18 @@ int main(int argc, char *argv[]) {
                         retval = sscanf((char*)buf+2, "%lf,%lf", &lon, &lat);
                         if (retval == 2) {
                             printf("recv %f,%f from cv2x\n", lon, lat);
-                            gettimeofday(&tv, NULL);
-                            mavlink_msg_set_position_target_global_int_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+(uint32_t)(tv.tv_usec*0.001), 0, 0, MAV_FRAME_GLOBAL_RELATIVE_ALT_INT, 3576, lat*1e7, lon*1e7, relative_alt_m, 0, 0, 0, 0, 0, 0, 0, 0);
-                            len = mavlink_msg_to_send_buffer(buf, &msg);
-                            write(uart_fd, buf, len);
-                            printf("cmd mav %d %d %f\n", (int)(lat*1e7), (int)(lon*1e7), relative_alt_m);
-                            char str_buf[50];
-                            sprintf(str_buf, "cv2x tgt %.2f %.2f", lon, lat);
-                            mavlink_msg_statustext_pack(mav_sysid, MY_COMP_ID, &msg, MAV_SEVERITY_INFO, str_buf, 0, 0);
-                            len = mavlink_msg_to_send_buffer(buf, &msg);
-                            write(uart_fd, buf, len);
+                            if (relative_alt_m > (TAKEOFF_ALT_M - 1)) {
+								gettimeofday(&tv, NULL);
+								mavlink_msg_set_position_target_global_int_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+(uint32_t)(tv.tv_usec*0.001), 0, 0, MAV_FRAME_GLOBAL_RELATIVE_ALT_INT, 3576, lat*1e7, lon*1e7, relative_alt_m, 0, 0, 0, 0, 0, 0, 0, 0);
+								len = mavlink_msg_to_send_buffer(buf, &msg);
+								write(uart_fd, buf, len);
+								printf("cmd mav %d %d %f\n", (int)(lat*1e7), (int)(lon*1e7), relative_alt_m);
+								char str_buf[50];
+								sprintf(str_buf, "cv2x tgt %.2f %.2f", lon, lat);
+								mavlink_msg_statustext_pack(mav_sysid, MY_COMP_ID, &msg, MAV_SEVERITY_INFO, str_buf, 0, 0);
+								len = mavlink_msg_to_send_buffer(buf, &msg);
+								write(uart_fd, buf, len);
+                            }
                         }
                     } else if (buf[0] == '3' && buf[1] == ',') {
                         if (buf[2] == '1') {
