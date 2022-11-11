@@ -43,7 +43,7 @@ int main(int argc, char *argv[]) {
     int ipc_fd;
     int wait_rot = 0;
     bool global_pos_rcvd = false;
-    float relative_alt_m = 10;
+    float relative_alt_m = 15;
     bool wait_guided = false;
     bool wait_arm = false;
     pid_t tgt_proc = -1;
@@ -155,7 +155,7 @@ int main(int argc, char *argv[]) {
                         //}
                         if (msg.msgid == MAVLINK_MSG_ID_HEARTBEAT) {
                             if (!global_pos_rcvd) {
-                                mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, 0, 0, MAV_CMD_SET_MESSAGE_INTERVAL, 0, MAVLINK_MSG_ID_GLOBAL_POSITION_INT, 2000000, 0, 0, 0, 0, 0);
+                                mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, 0, 0, MAV_CMD_SET_MESSAGE_INTERVAL, 0, MAVLINK_MSG_ID_GLOBAL_POSITION_INT, 1000000, 0, 0, 0, 0, 0);
                                 len = mavlink_msg_to_send_buffer(buf, &msg);
                                 write(uart_fd, buf, len);
                             }
@@ -172,7 +172,7 @@ int main(int argc, char *argv[]) {
                             } else if (wait_arm) {
                                 wait_arm = false;
                                 if (hb.base_mode & 128) {
-                                    mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, 0, 0, MAV_CMD_NAV_TAKEOFF, 0, 0, 0, 0, 0, 0, 0, 5);
+                                    mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, 0, 0, MAV_CMD_NAV_TAKEOFF, 0, 0, 0, 0, 0, 0, 0, 15);
                                     len = mavlink_msg_to_send_buffer(buf, &msg);
                                     write(uart_fd, buf, len);
                                 }
@@ -206,7 +206,9 @@ int main(int argc, char *argv[]) {
                             mavlink_global_position_int_t global_pos_int;
                             mavlink_msg_global_position_int_decode(&msg, &global_pos_int);
                             //printf("%d\n", global_pos_int.relative_alt);
-                            relative_alt_m = global_pos_int.relative_alt * 0.001f;
+                            if (global_pos_int.relative_alt > 3000) {
+								relative_alt_m = global_pos_int.relative_alt * 0.001f;
+                            }
                             len = snprintf(tx_buf, sizeof(tx_buf), "1,%.7f,%.7f", global_pos_int.lon*1e-7, global_pos_int.lat*1e-7);
                             sendto(sock_fd, tx_buf, len, 0, (struct sockaddr*)&to_cv2x, sizeof(to_cv2x));
                             //printf(tx_buf);
