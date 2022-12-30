@@ -16,7 +16,7 @@
 #include "mavlink/ardupilotmega/mavlink.h"
 
 #define MY_COMP_ID 191
-#define TAKEOFF_ALT_M 15
+#define TAKEOFF_ALT_M 20
 
 bool gogogo = true;
 
