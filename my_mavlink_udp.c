@@ -116,7 +116,7 @@ int main(int argc, char *argv[]) {
 				mav_sysid = msg.sysid;
 				printf("found MAV %d\n", msg.sysid);
 			}
-#if 0
+#if 1
                         if (msg.msgid == MAVLINK_MSG_ID_HEARTBEAT) {
                             mavlink_heartbeat_t hb;
                             mavlink_msg_heartbeat_decode(&msg, &hb);
@@ -125,7 +125,7 @@ int main(int argc, char *argv[]) {
                                     printf("start apriltag_plnd\n");
                                     tgt_proc = fork();
                                     if (tgt_proc == 0) {
-                                        execl("/home/pi/src/apriltag_plnd/apriltag_plnd","/home/pi/src/apriltag_plnd/apriltag_plnd",(char*)NULL);
+                                        execl("/home/pi/src/libcamera-apps/build/libcamera-hello","libcamera-hello","-n","--timeout=0","--framerate=10","--viewfinder-width=640","--viewfinder-height=480","--viewfinder-mode=1640:1232","--post-process-file","/home/pi/src/libcamera-apps/assets/apriltagplnd.json",(char*)0);
                                     }
                                 }
                             } else {
