@@ -13,6 +13,7 @@
 #include <netinet/in.h>
 #include <math.h>
 #include <sys/wait.h>
+#include <time.h>
 #include "mavlink/ardupilotmega/mavlink.h"
 
 #define MY_COMP_ID 191
@@ -125,7 +126,13 @@ int main(int argc, char *argv[]) {
                                     printf("start apriltag_plnd\n");
                                     tgt_proc = fork();
                                     if (tgt_proc == 0) {
-                                        execl("/home/pi/src/libcamera-apps/build/libcamera-hello","libcamera-hello","-n","--timeout=0","--framerate=10","--viewfinder-width=640","--viewfinder-height=480","--viewfinder-mode=1640:1232","--post-process-file","/home/pi/src/libcamera-apps/assets/apriltagplnd.json",(char*)0);
+					struct tm* now_tm;
+                                        time_t now_t = time(NULL);
+                                        now_tm = localtime(&now_t);
+                                        char vid_fname[128], ts_fname[128];
+                                        sprintf(vid_fname, "/home/pi/Videos/%d%02d%02d_%d%d%d.h264", now_tm->tm_year+1900, now_tm->tm_mon+1, now_tm->tm_mday, now_tm->tm_hour, now_tm->tm_min, now_tm->tm_sec);
+                                        sprintf(ts_fname, "/home/pi/Videos/%d%02d%02d_%d%d%d.ts", now_tm->tm_year+1900, now_tm->tm_mon+1, now_tm->tm_mday, now_tm->tm_hour, now_tm->tm_min, now_tm->tm_sec);
+                                        execl("/home/pi/src/libcamera-apps/build/libcamera-vid","libcamera-vid","-n","--timeout=0","--framerate=10","--width=640","--height=480","--mode=1640:1232","--post-process-file","/home/pi/src/libcamera-apps/assets/apriltagplnd.json","-o",vid_fname,"--save-pts",ts_fname,(char*)0);
                                     }
                                 }
                             } else {
