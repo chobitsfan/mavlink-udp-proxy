@@ -40,6 +40,7 @@ int main(int argc, char *argv[]) {
     uint8_t mav_sysid = 0;
     int ipc_fd;
     pid_t tgt_proc = -1;
+    uint8_t my_stage = 0;
 
     signal(SIGINT, sig_handler);
     signal(SIGTERM, sig_handler);
@@ -121,8 +122,9 @@ int main(int argc, char *argv[]) {
                         if (msg.msgid == MAVLINK_MSG_ID_HEARTBEAT) {
                             mavlink_heartbeat_t hb;
                             mavlink_msg_heartbeat_decode(&msg, &hb);
-                            if (hb.custom_mode == COPTER_MODE_LAND || hb.custom_mode == COPTER_MODE_RTL) {
+                            if (hb.custom_mode == COPTER_MODE_LOITER) {
                                 if (tgt_proc < 0) {
+                                    my_stage = 1;
                                     printf("start apriltag_plnd\n");
                                     tgt_proc = fork();
                                     if (tgt_proc == 0) {
@@ -135,12 +137,22 @@ int main(int argc, char *argv[]) {
                                         execl("/home/pi/src/libcamera-apps/build/libcamera-vid","libcamera-vid","-n","--timeout=0","--framerate=10","--width=640","--height=480","--mode=1640:1232","--post-process-file","/home/pi/src/libcamera-apps/assets/apriltagplnd.json","-o",vid_fname,"--save-pts",ts_fname,(char*)0);
                                     }
                                 }
+                            } else if (hb.custom_mode == COPTER_MODE_GUIDED) {
+                                if (my_stage == 1) my_stage = 2;
                             } else {
                                 if (tgt_proc > 0) {
                                    printf("kill apriltag_plnd\n");
                                    kill(tgt_proc, SIGINT);
                                    if (waitpid(tgt_proc, NULL, WNOHANG) == tgt_proc) tgt_proc = -1;
                                 }
+                            }
+                        } else if (msg.msgid == MAVLINK_MSG_ID_MISSION_ITEM_REACHED) {
+                            if (my_stage == 3) {
+                                my_stage = 4;
+                                gettimeofday(&tv, NULL);
+                                mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_BODY_OFFSET_NED, 0x0DF8, 3, -1, -0.1f, 0, 0, 0, 0, 0, 0, 0, 0);
+                                len = mavlink_msg_to_send_buffer(buf, &msg);
+                                write(uart_fd, buf, len);
                             }
                         }
 #endif
@@ -150,15 +162,22 @@ int main(int argc, char *argv[]) {
             if (FD_ISSET(ipc_fd, &rfds)) {
                 double tag_pose[6] = {0};
                 if (recv(ipc_fd, tag_pose, sizeof(tag_pose), 0) > 0) {
-                    gettimeofday(&tv, NULL);
-                    float q[4] = {1, 0, 0, 0};
-                    int tag_id = tag_pose[0];
+                    //float q[4] = {1, 0, 0, 0};
+                    //int tag_id = tag_pose[0];
                     double cam_r = tag_pose[1];
-                    double cam_d = tag_pose[2];
+                    //double cam_d = tag_pose[2];
                     double cam_f = tag_pose[3];
-                    mavlink_msg_landing_target_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000000+tv.tv_usec, tag_id, MAV_FRAME_BODY_FRD, 0, 0, sqrt(cam_r*cam_r+cam_d*cam_d+cam_f*cam_f), 0, 0, -cam_d, cam_r, cam_f, q, 0, 1);
-                    len = mavlink_msg_to_send_buffer(buf, &msg);
-                    write(uart_fd, buf, len);
+                    if (my_stage == 1) {
+                        mavlink_msg_set_mode_pack(mav_sysid, MY_COMP_ID, &msg, 0, 1, COPTER_MODE_GUIDED);
+                        len = mavlink_msg_to_send_buffer(buf, &msg);
+                        write(uart_fd, buf, len);
+                    } else if (my_stage == 2) {
+                        my_stage = 3;
+                        gettimeofday(&tv, NULL);
+                        mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_BODY_OFFSET_NED, 0x0DF8, cam_f, cam_r + 1, -0.1f, 0, 0, 0, 0, 0, 0, 0, 0);
+                        len = mavlink_msg_to_send_buffer(buf, &msg);
+                        write(uart_fd, buf, len);
+                    }
                 }
             }
         }
