@@ -118,7 +118,6 @@ int main(int argc, char *argv[]) {
 				mav_sysid = msg.sysid;
 				printf("found MAV %d\n", msg.sysid);
 			}
-#if 1
                         if (msg.msgid == MAVLINK_MSG_ID_HEARTBEAT) {
                             mavlink_heartbeat_t hb;
                             mavlink_msg_heartbeat_decode(&msg, &hb);
@@ -147,15 +146,16 @@ int main(int argc, char *argv[]) {
                                 }
                             }
                         } else if (msg.msgid == MAVLINK_MSG_ID_MISSION_ITEM_REACHED) {
-                            /*if (my_stage == 3) {
+#ifndef GUIDED_NXT_WP
+                            if (my_stage == 3) {
                                 my_stage = 4;
                                 gettimeofday(&tv, NULL);
                                 mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_BODY_OFFSET_NED, 0x0DF8, 3, -1, -0.1f, 0, 0, 0, 0, 0, 0, 0, 0);
                                 len = mavlink_msg_to_send_buffer(buf, &msg);
                                 write(uart_fd, buf, len);
-                            }*/
-                        }
+                            }
 #endif
+                        }
                     }
                 }
             }
@@ -165,23 +165,24 @@ int main(int argc, char *argv[]) {
                     //float q[4] = {1, 0, 0, 0};
                     //int tag_id = tag_pose[0];
                     double cam_r = tag_pose[1];
-                    //double cam_d = tag_pose[2];
+                    double cam_d = tag_pose[2];
                     double cam_f = tag_pose[3];
-                    if (my_stage == 1) {
+                    if (cam_f < 4 && my_stage == 1) {
                         mavlink_msg_set_mode_pack(mav_sysid, MY_COMP_ID, &msg, 0, 1, COPTER_MODE_GUIDED);
                         len = mavlink_msg_to_send_buffer(buf, &msg);
                         write(uart_fd, buf, len);
                     } else if (my_stage == 2) {
                         my_stage = 3;
                         gettimeofday(&tv, NULL);
-                        mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_BODY_OFFSET_NED, 0x0DF8, cam_f, cam_r + 1, -0.1f, 0, 0, 0, 0, 0, 0, 0, 0);
+                        mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_BODY_OFFSET_NED, 0x0DF8, cam_f, cam_r + 1, cam_d, 0, 0, 0, 0, 0, 0, 0, 0);
                         len = mavlink_msg_to_send_buffer(buf, &msg);
                         write(uart_fd, buf, len);
-
+#ifdef GUIDED_NXT_WP
                         gettimeofday(&tv, NULL);
-                        mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_BODY_OFFSET_NED, 0x0DF8 | 4096, cam_f + 3, cam_r, -0.1f, 0, 0, 0, 0, 0, 0, 0, 0);
+                        mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_BODY_OFFSET_NED, 0x0DF8 | 4096, cam_f + 3, cam_r, cam_d, 0, 0, 0, 0, 0, 0, 0, 0);
                         len = mavlink_msg_to_send_buffer(buf, &msg);
                         write(uart_fd, buf, len);
+#endif
                     }
                 }
             }
