@@ -39,7 +39,6 @@ int main(int argc, char *argv[]) {
     struct sockaddr_in server;
     uint8_t mav_sysid = 0;
     int ipc_fd;
-    pid_t tgt_proc = -1;
 
     signal(SIGINT, sig_handler);
     signal(SIGTERM, sig_handler);
@@ -85,7 +84,7 @@ int main(int argc, char *argv[]) {
     memset(&server, 0, sizeof(server));
     /* Set up the server name */
     server.sin_family      = AF_INET;            /* Internet Domain    */
-    server.sin_port        = htons(17510);  //Server Port
+    server.sin_port        = htons(17500);  //Server Port
     server.sin_addr.s_addr = inet_addr("127.0.0.1");
     if (bind(ipc_fd, (const struct sockaddr *)&server, sizeof(server)) < 0) {
         printf("bind local failed\n");
@@ -113,50 +112,27 @@ int main(int argc, char *argv[]) {
                     if (mavlink_parse_char(0, buf[i], &msg, &status)) {
                         if (msg.sysid == 255) continue;
                         //printf("recv msg ID %d, seq %d\n", msg.msgid, msg.seq);
-			if (msg.sysid != mav_sysid) {
-				mav_sysid = msg.sysid;
-				printf("found MAV %d\n", msg.sysid);
-			}
-#if 1
                         if (msg.msgid == MAVLINK_MSG_ID_HEARTBEAT) {
-                            mavlink_heartbeat_t hb;
-                            mavlink_msg_heartbeat_decode(&msg, &hb);
-                            if (hb.custom_mode == COPTER_MODE_LAND || hb.custom_mode == COPTER_MODE_RTL) {
-                                if (tgt_proc < 0) {
-                                    printf("start apriltag_plnd\n");
-                                    tgt_proc = fork();
-                                    if (tgt_proc == 0) {
-					struct tm* now_tm;
-                                        time_t now_t = time(NULL);
-                                        now_tm = localtime(&now_t);
-                                        char vid_fname[128], ts_fname[128];
-                                        sprintf(vid_fname, "/home/pi/Videos/%d%02d%02d_%d%d%d.h264", now_tm->tm_year+1900, now_tm->tm_mon+1, now_tm->tm_mday, now_tm->tm_hour, now_tm->tm_min, now_tm->tm_sec);
-                                        sprintf(ts_fname, "/home/pi/Videos/%d%02d%02d_%d%d%d.ts", now_tm->tm_year+1900, now_tm->tm_mon+1, now_tm->tm_mday, now_tm->tm_hour, now_tm->tm_min, now_tm->tm_sec);
-                                        execl("/home/pi/src/libcamera-apps/build/libcamera-vid","libcamera-vid","-n","--timeout=0","--framerate=10","--width=640","--height=480","--mode=1640:1232","--post-process-file","/home/pi/src/libcamera-apps/assets/apriltagplnd.json","-o",vid_fname,"--save-pts",ts_fname,(char*)0);
-                                    }
-                                }
-                            } else {
-                                if (tgt_proc > 0) {
-                                   printf("kill apriltag_plnd\n");
-                                   kill(tgt_proc, SIGINT);
-                                   if (waitpid(tgt_proc, NULL, WNOHANG) == tgt_proc) tgt_proc = -1;
-                                }
+                            if (msg.sysid != mav_sysid) {
+                                mav_sysid = msg.sysid;
+                                printf("found MAV %d\n", msg.sysid);
                             }
-                        }
-#endif
+                        } else if (msg.msgid == MAVLINK_MSG_ID_STATUSTEXT) {
+                            mavlink_statustext_t txt;
+                            mavlink_msg_statustext_decode(&msg, &txt);
+                            printf("fc: %s\n", txt.text);
+			            }
                     }
                 }
             }
             if (FD_ISSET(ipc_fd, &rfds)) {
-                double tag_pose[6] = {0};
-                if (recv(ipc_fd, tag_pose, sizeof(tag_pose), 0) > 0) {
+                float pose[7];
+                if (recv(ipc_fd, pose, sizeof(pose), 0) > 0) {
                     gettimeofday(&tv, NULL);
-                    float q[4] = {1, 0, 0, 0};
-                    int tag_id = tag_pose[0];
-                    double cam_r = tag_pose[1];
-                    double cam_d = tag_pose[2];
-                    double cam_f = tag_pose[3];
-                    mavlink_msg_landing_target_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000000+tv.tv_usec, tag_id, MAV_FRAME_BODY_FRD, 0, 0, sqrt(cam_r*cam_r+cam_d*cam_d+cam_f*cam_f), 0, 0, -cam_d, cam_r, cam_f, q, 0, 1);
+                    float covar[21] = {0};
+                    pose[2] = -pose[2];
+                    pose[3] = -pose[3];
+                    mavlink_msg_att_pos_mocap_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000000+tv.tv_usec, pose, pose[4], -pose[5], -pose[6], covar);
                     len = mavlink_msg_to_send_buffer(buf, &msg);
                     write(uart_fd, buf, len);
                 }
@@ -166,9 +142,6 @@ int main(int argc, char *argv[]) {
 
     close(uart_fd);
     close(ipc_fd);
-    if (tgt_proc > 0) {
-        kill(SIGINT, tgt_proc);
-        wait(NULL);
-    }
+
     return 0;
 }
