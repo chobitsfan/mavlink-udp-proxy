@@ -14,15 +14,11 @@
 #include <math.h>
 #include <sys/wait.h>
 #include <time.h>
+#include <ros/ros.h>
+#include <sensor_msgs/Imu.h>
 #include "mavlink/ardupilotmega/mavlink.h"
 
 #define MY_COMP_ID 191
-
-bool gogogo = true;
-
-void sig_handler(int signum) {
-    gogogo = false;
-}
 
 int main(int argc, char *argv[]) {
     fd_set rfds;
@@ -39,9 +35,8 @@ int main(int argc, char *argv[]) {
     struct sockaddr_in server;
     uint8_t mav_sysid = 0;
     int ipc_fd;
-
-    signal(SIGINT, sig_handler);
-    signal(SIGTERM, sig_handler);
+    bool no_hr_imu = true;
+    bool no_att_q = true;
 
     uart_fd = open("/dev/ttyAMA0", O_RDWR);
     if (uart_fd < 0) {
@@ -96,7 +91,13 @@ int main(int argc, char *argv[]) {
 
     printf("hello\n");
 
-    while (gogogo) {
+    ros::init(argc, argv, "test_node_outside_catkin_ws");
+    ros::NodeHandle ros_nh;
+    ROS_INFO("It worked!");
+
+    ros::Publisher imu_pub = ros_nh.advertise<sensor_msgs::Imu>("/chobits/imu", 1);
+
+    while (ros::ok()) {
         FD_ZERO(&rfds);
         FD_SET(uart_fd, &rfds);
         FD_SET(ipc_fd, &rfds);
@@ -117,11 +118,35 @@ int main(int argc, char *argv[]) {
                                 mav_sysid = msg.sysid;
                                 printf("found MAV %d\n", msg.sysid);
                             }
+                            if (no_hr_imu) {
+                                mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, 0, 0, MAV_CMD_SET_MESSAGE_INTERVAL, 0, MAVLINK_MSG_ID_HIGHRES_IMU, 10000, 0, 0, 0, 0, 0);
+                                len = mavlink_msg_to_send_buffer(buf, &msg);
+                                write(uart_fd, buf, len);
+                            }
+                        } else if (msg.msgid == MAVLINK_MSG_ID_TIMESYNC) {
+                            gettimeofday(&tv, NULL);
+                            mavlink_msg_system_time_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000000+tv.tv_usec, 0);
+                            len = mavlink_msg_to_send_buffer(buf, &msg);
+                            write(uart_fd, buf, len);
                         } else if (msg.msgid == MAVLINK_MSG_ID_STATUSTEXT) {
                             mavlink_statustext_t txt;
                             mavlink_msg_statustext_decode(&msg, &txt);
                             printf("fc: %s\n", txt.text);
-			            }
+			            } else if (msg.msgid == MAVLINK_MSG_ID_HIGHRES_IMU) {
+                            no_hr_imu = false;
+                            mavlink_highres_imu_t hr_imu;
+                            mavlink_msg_highres_imu_decode(&msg, &hr_imu);
+                            sensor_msgs::Imu imu_msg;
+                            imu_msg.header.stamp = ros::Time::now();
+                            imu_msg.header.frame_id = "world";
+                            imu_msg.linear_acceleration.x = hr_imu.xacc;
+                            imu_msg.linear_acceleration.y = hr_imu.yacc;
+                            imu_msg.linear_acceleration.z = hr_imu.zacc;
+                            imu_msg.angular_velocity.x = hr_imu.xgyro;
+                            imu_msg.angular_velocity.y = hr_imu.ygyro;
+                            imu_msg.angular_velocity.z = hr_imu.zgyro;
+                            imu_pub.publish(imu_msg);
+                        }
                     }
                 }
             }
@@ -142,6 +167,8 @@ int main(int argc, char *argv[]) {
 
     close(uart_fd);
     close(ipc_fd);
+
+    printf("bye\n");
 
     return 0;
 }

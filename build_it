@@ -1,2 +1,2 @@
 #!/bin/bash
-gcc -Wall -Wno-unused-result -O1 -o mavlink_udp  my_mavlink_udp.c -lm
+g++ -Wall -Wno-unused-result my_mavlink_udp.cpp -o mavlink_udp -I/opt/ros/melodic/include -L/opt/ros/melodic/lib -lm -lroscpp -lrostime -lrosconsole -lroscpp_serialization
