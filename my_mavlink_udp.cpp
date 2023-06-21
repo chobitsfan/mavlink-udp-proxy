@@ -37,6 +37,9 @@ int main(int argc, char *argv[]) {
     int ipc_fd;
     bool no_hr_imu = true;
     bool no_att_q = true;
+    float att_q_x, att_q_y, att_q_z, att_q_w;
+    int64_t time_offset_us = 0;
+    uint64_t last_us = 0;
 
     uart_fd = open("/dev/ttyAMA0", O_RDWR);
     if (uart_fd < 0) {
@@ -118,16 +121,33 @@ int main(int argc, char *argv[]) {
                                 mav_sysid = msg.sysid;
                                 printf("found MAV %d\n", msg.sysid);
                             }
+                            if (time_offset_us == 0) {
+                                gettimeofday(&tv, NULL);
+                                mavlink_msg_timesync_pack(mav_sysid, MY_COMP_ID, &msg, 0, tv.tv_sec*1000000+tv.tv_usec, mav_sysid, 1); //fill timesync with us instead of ns
+                                len = mavlink_msg_to_send_buffer(buf, &msg);
+                                write(uart_fd, buf, len);
+
+                                mavlink_msg_system_time_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000000+tv.tv_usec, 0);
+                                len = mavlink_msg_to_send_buffer(buf, &msg);
+                                write(uart_fd, buf, len);
+                            }
                             if (no_hr_imu) {
                                 mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, 0, 0, MAV_CMD_SET_MESSAGE_INTERVAL, 0, MAVLINK_MSG_ID_HIGHRES_IMU, 10000, 0, 0, 0, 0, 0);
                                 len = mavlink_msg_to_send_buffer(buf, &msg);
                                 write(uart_fd, buf, len);
                             }
+                            if (no_att_q) {
+                                mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, 0, 0, MAV_CMD_SET_MESSAGE_INTERVAL, 0, MAVLINK_MSG_ID_ATTITUDE_QUATERNION, 10000, 0, 0, 0, 0, 0);
+                                len = mavlink_msg_to_send_buffer(buf, &msg);
+                                write(uart_fd, buf, len);
+                            }
                         } else if (msg.msgid == MAVLINK_MSG_ID_TIMESYNC) {
-                            gettimeofday(&tv, NULL);
-                            mavlink_msg_system_time_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000000+tv.tv_usec, 0);
-                            len = mavlink_msg_to_send_buffer(buf, &msg);
-                            write(uart_fd, buf, len);
+                            mavlink_timesync_t ts;
+                            mavlink_msg_timesync_decode(&msg, &ts);
+                            if (ts.tc1 != 0) {
+                                time_offset_us = ts.ts1 - ts.tc1;
+                                printf("time offset %ld\n", time_offset_us);
+                            }
                         } else if (msg.msgid == MAVLINK_MSG_ID_STATUSTEXT) {
                             mavlink_statustext_t txt;
                             mavlink_msg_statustext_decode(&msg, &txt);
@@ -135,17 +155,35 @@ int main(int argc, char *argv[]) {
 			            } else if (msg.msgid == MAVLINK_MSG_ID_HIGHRES_IMU) {
                             no_hr_imu = false;
                             mavlink_highres_imu_t hr_imu;
-                            mavlink_msg_highres_imu_decode(&msg, &hr_imu);
-                            sensor_msgs::Imu imu_msg;
-                            imu_msg.header.stamp = ros::Time::now();
-                            imu_msg.header.frame_id = "world";
-                            imu_msg.linear_acceleration.x = hr_imu.xacc;
-                            imu_msg.linear_acceleration.y = hr_imu.yacc;
-                            imu_msg.linear_acceleration.z = hr_imu.zacc;
-                            imu_msg.angular_velocity.x = hr_imu.xgyro;
-                            imu_msg.angular_velocity.y = hr_imu.ygyro;
-                            imu_msg.angular_velocity.z = hr_imu.zgyro;
-                            imu_pub.publish(imu_msg);
+                            mavlink_msg_highres_imu_decode(&msg, &hr_imu); // time_usec is time since boot
+                            if (hr_imu.time_usec > last_us) {
+                                last_us = hr_imu.time_usec;
+                                sensor_msgs::Imu imu_msg;
+                                imu_msg.header.stamp = ros::Time::now();
+                                //int64_t ts_us = hr_imu.time_usec + time_offset_us;
+                                //imu_msg.header.stamp.sec = ts_us / 1000000;
+                                //imu_msg.header.stamp.nsec = (ts_us % 1000000) * 1000;
+                                imu_msg.header.frame_id = "world";
+                                imu_msg.linear_acceleration.x = hr_imu.xacc;
+                                imu_msg.linear_acceleration.y = hr_imu.yacc;
+                                imu_msg.linear_acceleration.z = hr_imu.zacc;
+                                imu_msg.angular_velocity.x = hr_imu.xgyro;
+                                imu_msg.angular_velocity.y = hr_imu.ygyro;
+                                imu_msg.angular_velocity.z = hr_imu.zgyro;
+                                imu_msg.orientation.w = att_q_w;
+                                imu_msg.orientation.x = att_q_y;
+                                imu_msg.orientation.y = att_q_x;
+                                imu_msg.orientation.z = -att_q_z;
+                                imu_pub.publish(imu_msg);
+                            }
+                        } else if (msg.msgid == MAVLINK_MSG_ID_ATTITUDE_QUATERNION) {
+                            no_att_q = false;
+                            mavlink_attitude_quaternion_t att_q;
+                            mavlink_msg_attitude_quaternion_decode(&msg, &att_q);
+                            att_q_w = att_q.q1;
+                            att_q_x = att_q.q2;
+                            att_q_y = att_q.q3;
+                            att_q_z = att_q.q4;
                         }
                     }
                 }
