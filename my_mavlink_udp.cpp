@@ -159,10 +159,13 @@ int main(int argc, char *argv[]) {
                             if (hr_imu.time_usec > last_us) {
                                 last_us = hr_imu.time_usec;
                                 sensor_msgs::Imu imu_msg;
+#if 0
                                 imu_msg.header.stamp = ros::Time::now();
-                                //int64_t ts_us = hr_imu.time_usec + time_offset_us;
-                                //imu_msg.header.stamp.sec = ts_us / 1000000;
-                                //imu_msg.header.stamp.nsec = (ts_us % 1000000) * 1000;
+#else
+                                int64_t ts_us = hr_imu.time_usec + time_offset_us;
+                                imu_msg.header.stamp.sec = ts_us / 1000000;
+                                imu_msg.header.stamp.nsec = (ts_us % 1000000) * 1000;
+#endif
                                 imu_msg.header.frame_id = "world";
                                 imu_msg.linear_acceleration.x = hr_imu.xacc;
                                 imu_msg.linear_acceleration.y = hr_imu.yacc;
@@ -171,9 +174,9 @@ int main(int argc, char *argv[]) {
                                 imu_msg.angular_velocity.y = hr_imu.ygyro;
                                 imu_msg.angular_velocity.z = hr_imu.zgyro;
                                 imu_msg.orientation.w = att_q_w;
-                                imu_msg.orientation.x = att_q_y;
-                                imu_msg.orientation.y = att_q_x;
-                                imu_msg.orientation.z = -att_q_z;
+                                imu_msg.orientation.x = att_q_x;
+                                imu_msg.orientation.y = att_q_y;
+                                imu_msg.orientation.z = att_q_z;
                                 imu_pub.publish(imu_msg);
                             }
                         } else if (msg.msgid == MAVLINK_MSG_ID_ATTITUDE_QUATERNION) {
