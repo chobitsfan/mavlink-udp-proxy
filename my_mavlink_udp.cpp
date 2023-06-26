@@ -196,7 +196,7 @@ int main(int argc, char *argv[]) {
                 if (recv(ipc_fd, pose, sizeof(pose), 0) > 0) {
                     gettimeofday(&tv, NULL);
                     float covar[21] = {0};
-                    pose[2] = -pose[2];
+                    pose[2] = -pose[2]; //to ned
                     pose[3] = -pose[3];
                     mavlink_msg_att_pos_mocap_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000000+tv.tv_usec, pose, pose[4], -pose[5], -pose[6], covar);
                     len = mavlink_msg_to_send_buffer(buf, &msg);
