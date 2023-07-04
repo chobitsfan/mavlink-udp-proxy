@@ -152,11 +152,11 @@ int main(int argc, char *argv[]) {
                             mavlink_statustext_t txt;
                             mavlink_msg_statustext_decode(&msg, &txt);
                             printf("fc: %s\n", txt.text);
-			            } else if (msg.msgid == MAVLINK_MSG_ID_HIGHRES_IMU) {
+   	                } else if (msg.msgid == MAVLINK_MSG_ID_HIGHRES_IMU) {
                             no_hr_imu = false;
                             mavlink_highres_imu_t hr_imu;
                             mavlink_msg_highres_imu_decode(&msg, &hr_imu); // time_usec is time since boot
-                            if (hr_imu.time_usec > last_us) {
+                            if (time_offset_us > 0 && hr_imu.time_usec > last_us) {
                                 last_us = hr_imu.time_usec;
                                 sensor_msgs::Imu imu_msg;
 #if 0
