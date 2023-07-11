@@ -192,13 +192,17 @@ int main(int argc, char *argv[]) {
                 }
             }
             if (FD_ISSET(ipc_fd, &rfds)) {
-                float pose[7];
+                float pose[10];
                 if (recv(ipc_fd, pose, sizeof(pose), 0) > 0) {
-                    gettimeofday(&tv, NULL);
                     float covar[21] = {0};
                     pose[2]=-pose[2];
                     pose[3]=-pose[3];
+                    gettimeofday(&tv, NULL);
                     mavlink_msg_att_pos_mocap_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000000+tv.tv_usec, pose, pose[4], -pose[5], -pose[6], covar);
+                    len = mavlink_msg_to_send_buffer(buf, &msg);
+                    write(uart_fd, buf, len);
+                    gettimeofday(&tv, NULL);
+		    mavlink_msg_vision_speed_estimate_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000000+tv.tv_usec, pose[7], -pose[8], -pose[9], covar, 0);
                     len = mavlink_msg_to_send_buffer(buf, &msg);
                     write(uart_fd, buf, len);
                 }
