@@ -37,7 +37,7 @@ int main(int argc, char *argv[]) {
     int ipc_fd;
     bool no_hr_imu = true;
     bool no_att_q = true;
-    float att_q_x, att_q_y, att_q_z, att_q_w;
+    float att_q_x =0, att_q_y = 0, att_q_z = 0, att_q_w = 0;
     int64_t time_offset_us = 0;
     uint64_t last_us = 0;
 
@@ -68,8 +68,8 @@ int main(int argc, char *argv[]) {
     tty.c_oflag &= ~ONLCR; // Prevent conversion of newline to carriage return/line feed
     tty.c_cc[VTIME] = 10;    // Wait for up to 1s (10 deciseconds), returning as soon as any data is received.
     tty.c_cc[VMIN] = 0;
-    cfsetispeed(&tty, B921600);
-    cfsetospeed(&tty, B921600);
+    cfsetispeed(&tty, B1500000);
+    cfsetospeed(&tty, B1500000);
     // Save tty settings, also checking for error
     if (tcsetattr(uart_fd, TCSANOW, &tty) != 0) {
         printf("Error %i from tcsetattr: %s\n", errno, strerror(errno));
