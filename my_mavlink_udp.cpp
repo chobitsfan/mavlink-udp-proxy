@@ -40,6 +40,7 @@ int main(int argc, char *argv[]) {
     float att_q_x =0, att_q_y = 0, att_q_z = 0, att_q_w = 0;
     int64_t time_offset_us = 0;
     uint64_t last_us = 0;
+    bool tgt_send = false;
 
     uart_fd = open("/dev/ttyAMA0", O_RDWR);
     if (uart_fd < 0) {
@@ -117,6 +118,8 @@ int main(int argc, char *argv[]) {
                         if (msg.sysid == 255) continue;
                         //printf("recv msg ID %d, seq %d\n", msg.msgid, msg.seq);
                         if (msg.msgid == MAVLINK_MSG_ID_HEARTBEAT) {
+                            mavlink_heartbeat_t hb;
+                            mavlink_msg_heartbeat_decode(&msg, &hb);
                             if (msg.sysid != mav_sysid) {
                                 mav_sysid = msg.sysid;
                                 printf("found MAV %d\n", msg.sysid);
@@ -140,6 +143,19 @@ int main(int argc, char *argv[]) {
                                 mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, 0, 0, MAV_CMD_SET_MESSAGE_INTERVAL, 0, MAVLINK_MSG_ID_ATTITUDE_QUATERNION, 10000, 0, 0, 0, 0, 0);
                                 len = mavlink_msg_to_send_buffer(buf, &msg);
                                 write(uart_fd, buf, len);
+                            }
+                            if (hb.custom_mode == COPTER_MODE_GUIDED) {
+                                if (!tgt_send) {
+                                    tgt_send = true;
+#if 1
+                                    gettimeofday(&tv, NULL);
+                                    mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_BODY_OFFSET_NED, 0x0DF8, 4.5f, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0);
+                                    len = mavlink_msg_to_send_buffer(buf, &msg);
+                                    write(uart_fd, buf, len);
+#endif
+                                }
+                            } else {
+                                tgt_send = false;
                             }
                         } else if (msg.msgid == MAVLINK_MSG_ID_TIMESYNC) {
                             mavlink_timesync_t ts;
