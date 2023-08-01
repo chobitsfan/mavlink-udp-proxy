@@ -13,15 +13,17 @@
 #include <netinet/in.h>
 #include <math.h>
 #include <sys/wait.h>
+#include <poll.h>
 #include <time.h>
 #include <ros/ros.h>
 #include <sensor_msgs/Imu.h>
 #include "mavlink/ardupilotmega/mavlink.h"
 
 #define MY_COMP_ID 191
+#define MY_NUM_PFDS 2
 
 int main(int argc, char *argv[]) {
-    fd_set rfds;
+    struct pollfd pfds[MY_NUM_PFDS];
     struct timeval tv;
     int retval, uart_fd;
     unsigned int len;
@@ -31,7 +33,6 @@ int main(int argc, char *argv[]) {
     mavlink_message_t msg;
     // Create new termios struc, we call it 'tty' for convention
     struct termios tty;
-    int high_fd;
     struct sockaddr_in server;
     uint8_t mav_sysid = 0;
     int ipc_fd;
@@ -91,8 +92,10 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    high_fd = ipc_fd;
-    if (uart_fd > high_fd) high_fd = uart_fd;
+    pfds[0].fd= uart_fd;
+    pfds[0].events = POLLIN;
+    pfds[1].fd= ipc_fd;
+    pfds[1].events = POLLIN;
 
     printf("hello\n");
 
@@ -103,16 +106,9 @@ int main(int argc, char *argv[]) {
     ros::Publisher imu_pub = ros_nh.advertise<sensor_msgs::Imu>("/chobits/imu", 1);
 
     while (ros::ok()) {
-        FD_ZERO(&rfds);
-        FD_SET(uart_fd, &rfds);
-        FD_SET(ipc_fd, &rfds);
-
-        tv.tv_sec = 10;
-        tv.tv_usec = 0;
-
-        retval = select(high_fd + 1, &rfds, NULL, NULL, &tv);
+        retval = poll(pfds, MY_NUM_PFDS, 5000);
         if (retval > 0) {
-            if (FD_ISSET(uart_fd, &rfds)) {
+            if (pfds[0].revents & POLLIN) {
                 avail = read(uart_fd, buf, 512);
                 for (int i = 0; i < avail; i++) {
                     if (mavlink_parse_char(0, buf[i], &msg, &status)) {
@@ -219,7 +215,7 @@ int main(int argc, char *argv[]) {
                     }
                 }
             }
-            if (FD_ISSET(ipc_fd, &rfds)) {
+            if (pfds[1].revents & POLLIN) {
                 float pose[10];
                 if (recv(ipc_fd, pose, sizeof(pose), 0) > 0) {
                     latest_alt = pose[6];
