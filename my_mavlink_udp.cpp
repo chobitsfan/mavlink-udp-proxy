@@ -20,7 +20,7 @@
 #include "mavlink/ardupilotmega/mavlink.h"
 
 #define MY_COMP_ID 191
-#define MY_NUM_PFDS 2
+#define MY_NUM_PFDS 3
 
 int main(int argc, char *argv[]) {
     struct pollfd pfds[MY_NUM_PFDS];
@@ -33,9 +33,9 @@ int main(int argc, char *argv[]) {
     mavlink_message_t msg;
     // Create new termios struc, we call it 'tty' for convention
     struct termios tty;
-    struct sockaddr_in server;
+    struct sockaddr_in ipc_addr, ipc_addr2;
     uint8_t mav_sysid = 0;
-    int ipc_fd;
+    int ipc_fd, ipc_fd2;
     bool no_hr_imu = true;
     bool no_att_q = true;
     float att_q_x =0, att_q_y = 0, att_q_z = 0, att_q_w = 0;
@@ -82,12 +82,23 @@ int main(int argc, char *argv[]) {
     if ((ipc_fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
         return 1;
     }
-    memset(&server, 0, sizeof(server));
-    /* Set up the server name */
-    server.sin_family      = AF_INET;            /* Internet Domain    */
-    server.sin_port        = htons(17500);  //Server Port
-    server.sin_addr.s_addr = inet_addr("127.0.0.1");
-    if (bind(ipc_fd, (const struct sockaddr *)&server, sizeof(server)) < 0) {
+    memset(&ipc_addr, 0, sizeof(ipc_addr));
+    ipc_addr.sin_family = AF_INET;
+    ipc_addr.sin_port = htons(17500);
+    ipc_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    if (bind(ipc_fd, (const struct sockaddr *)&ipc_addr, sizeof(ipc_addr)) < 0) {
+        printf("bind local failed\n");
+        return 1;
+    }
+
+    if ((ipc_fd2 = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+        return 1;
+    }
+    memset(&ipc_addr2, 0, sizeof(ipc_addr2));
+    ipc_addr2.sin_family = AF_INET;
+    ipc_addr2.sin_port = htons(17501);
+    ipc_addr2.sin_addr.s_addr = inet_addr("127.0.0.1");
+    if (bind(ipc_fd2, (const struct sockaddr *)&ipc_addr2, sizeof(ipc_addr2)) < 0) {
         printf("bind local failed\n");
         return 1;
     }
@@ -96,6 +107,8 @@ int main(int argc, char *argv[]) {
     pfds[0].events = POLLIN;
     pfds[1].fd= ipc_fd;
     pfds[1].events = POLLIN;
+    pfds[2].fd= ipc_fd2;
+    pfds[2].events = POLLIN;
 
     printf("hello\n");
 
@@ -234,7 +247,11 @@ int main(int argc, char *argv[]) {
 
 					if (demo_stage == 1 && (latest_alt - gnd_alt) > 0.5f) {
 						demo_stage = 2;
-						gettimeofday(&tv, NULL);
+                        gettimeofday(&tv, NULL);
+                        mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_BODY_OFFSET_NED, 0x0DF8, 5, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0);
+                        len = mavlink_msg_to_send_buffer(buf, &msg);
+                        write(uart_fd, buf, len);
+						/*gettimeofday(&tv, NULL);
                         mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_BODY_OFFSET_NED, 0x0DF8, 2, 1.5f, -0.7f, 0, 0, 0, 0, 0, 0, 0, 0);
                         len = mavlink_msg_to_send_buffer(buf, &msg);
                         write(uart_fd, buf, len);
@@ -242,14 +259,31 @@ int main(int argc, char *argv[]) {
                         mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_BODY_OFFSET_NED, 0x0DF8 | 4096, 5, 0, -1,
 0, 0, 0, 0, 0, 0, 0, 0);
                         len = mavlink_msg_to_send_buffer(buf, &msg);
-                        write(uart_fd, buf, len);
-                    } else if (demo_stage == 2 && (latest_x - start_x) > 4.5f) {
-						demo_stage = 3;
+                        write(uart_fd, buf, len);*/
+                    } else if ((demo_stage == 2 || demo_stage == 3) && (latest_x - start_x) > 4.5f) {
+						demo_stage = 100;
 						gettimeofday(&tv, NULL);
 						mavlink_msg_set_mode_pack(mav_sysid, MY_COMP_ID, &msg, mav_sysid, 1, 9);
                         len = mavlink_msg_to_send_buffer(buf, &msg);
                         write(uart_fd, buf, len);
 					}
+                }
+            }
+            if (pfds[2].revents & POLLIN) {
+                int prx_msg;
+                if (recv(ipc_fd2, &prx_msg, sizeof(prx_msg), 0) > 0) {
+                    if (demo_stage == 2 && prx_msg == 1) {
+                        demo_stage = 3;
+                        gettimeofday(&tv, NULL);
+                        mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_BODY_OFFSET_NED, 0x0DF8, 1, 1.5f, -0.5f, 0, 0, 0, 0, 0, 0, 0, 0);
+                        len = mavlink_msg_to_send_buffer(buf, &msg);
+                        write(uart_fd, buf, len);
+
+                        mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_BODY_OFFSET_NED, 0x0DF8 | 4096, 4, 0, -1,
+0, 0, 0, 0, 0, 0, 0, 0);
+                        len = mavlink_msg_to_send_buffer(buf, &msg);
+                        write(uart_fd, buf, len);
+                    }
                 }
             }
         }
