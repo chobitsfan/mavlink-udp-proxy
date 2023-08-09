@@ -9,6 +9,7 @@
 #include <termios.h> // Contains POSIX terminal control definitions
 #include <errno.h> // Error integer and strerror() function
 #include <sys/socket.h>
+#include <sys/un.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <math.h>
@@ -21,6 +22,8 @@
 
 #define MY_COMP_ID 191
 #define MY_NUM_PFDS 3
+#define SERVER_PATH "/tmp/chobits_server"
+#define SERVER_PATH2 "/tmp/chobits_server2"
 
 int main(int argc, char *argv[]) {
     struct pollfd pfds[MY_NUM_PFDS];
@@ -33,7 +36,7 @@ int main(int argc, char *argv[]) {
     mavlink_message_t msg;
     // Create new termios struc, we call it 'tty' for convention
     struct termios tty;
-    struct sockaddr_in ipc_addr, ipc_addr2;
+    struct sockaddr_un ipc_addr, ipc_addr2;
     uint8_t mav_sysid = 0;
     int ipc_fd, ipc_fd2;
     bool no_hr_imu = true;
@@ -79,25 +82,25 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    if ((ipc_fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+    if ((ipc_fd = socket(AF_UNIX, SOCK_DGRAM, 0)) < 0) {
         return 1;
     }
     memset(&ipc_addr, 0, sizeof(ipc_addr));
-    ipc_addr.sin_family = AF_INET;
-    ipc_addr.sin_port = htons(17500);
-    ipc_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    ipc_addr.sun_family = AF_UNIX;
+    strcpy(ipc_addr.sun_path, SERVER_PATH);
+    unlink(SERVER_PATH);
     if (bind(ipc_fd, (const struct sockaddr *)&ipc_addr, sizeof(ipc_addr)) < 0) {
         printf("bind local failed\n");
         return 1;
     }
 
-    if ((ipc_fd2 = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+    if ((ipc_fd2 = socket(AF_UNIX, SOCK_DGRAM, 0)) < 0) {
         return 1;
     }
     memset(&ipc_addr2, 0, sizeof(ipc_addr2));
-    ipc_addr2.sin_family = AF_INET;
-    ipc_addr2.sin_port = htons(17501);
-    ipc_addr2.sin_addr.s_addr = inet_addr("127.0.0.1");
+    ipc_addr2.sun_family = AF_UNIX;
+    strcpy(ipc_addr2.sun_path, SERVER_PATH2);
+    unlink(SERVER_PATH2);
     if (bind(ipc_fd2, (const struct sockaddr *)&ipc_addr2, sizeof(ipc_addr2)) < 0) {
         printf("bind local failed\n");
         return 1;
@@ -116,7 +119,7 @@ int main(int argc, char *argv[]) {
     ros::NodeHandle ros_nh;
     ROS_INFO("It worked!");
 
-    ros::Publisher imu_pub = ros_nh.advertise<sensor_msgs::Imu>("/chobits/imu", 1);
+    ros::Publisher imu_pub = ros_nh.advertise<sensor_msgs::Imu>("/chobits/imu", 100);
 
     while (ros::ok()) {
         retval = poll(pfds, MY_NUM_PFDS, 5000);
