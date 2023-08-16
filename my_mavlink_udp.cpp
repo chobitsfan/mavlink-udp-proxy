@@ -46,6 +46,7 @@ int main(int argc, char *argv[]) {
     uint64_t last_us = 0;
 	float latest_alt = 0, gnd_alt = 0, latest_x = 0, start_x = 0;
     int demo_stage = 0;
+    int rot_wait_cc = 0;
 
     uart_fd = open("/dev/ttyAMA0", O_RDWR);
     if (uart_fd < 0) {
@@ -168,7 +169,24 @@ int main(int argc, char *argv[]) {
 									mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, mav_sysid, 1, MAV_CMD_NAV_TAKEOFF, 0, 0, 0, 0, 0, 0, 0, 1);
                                     len = mavlink_msg_to_send_buffer(buf, &msg);
                                     write(uart_fd, buf, len);
+                                } else if (demo_stage == 4) {
+                                    demo_stage = 5;
+                                    gettimeofday(&tv, NULL);
+                                    mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, mav_sysid, 1, MAV_CMD_CONDITION_YAW, 0, 180, 20, 1, 0, 0, 0, 0);
+                                    len = mavlink_msg_to_send_buffer(buf, &msg);
+                                    write(uart_fd, buf, len);
+                                } else if (demo_stage == 5) {
+                                    rot_wait_cc++;
+                                    if (rot_wait_cc > 11) {
+                                        demo_stage = 6;
+                                        gettimeofday(&tv, NULL);
+                                        mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_BODY_OFFSET_NED, 0x0DF8, 5, 0, -2, 0, 0, 0, 0, 0, 0, 0, 0);
+                                        len = mavlink_msg_to_send_buffer(buf, &msg);
+                                        write(uart_fd, buf, len);
+                                    }
                                 }
+                            } else if (hb.custom_mode == COPTER_MODE_LOITER) {
+                                if (demo_stage == 3) demo_stage = 4;
                             } else {
                                 demo_stage = 0;
                             }
@@ -263,13 +281,13 @@ int main(int argc, char *argv[]) {
 0, 0, 0, 0, 0, 0, 0, 0);
                         len = mavlink_msg_to_send_buffer(buf, &msg);
                         write(uart_fd, buf, len);*/
-                    } else if ((demo_stage == 2 || demo_stage == 3) && (latest_x - start_x) > 4.5f) {
+                    } /*else if ((demo_stage == 2 || demo_stage == 3) && (latest_x - start_x) > 4.5f) {
 						demo_stage = 100;
 						gettimeofday(&tv, NULL);
 						mavlink_msg_set_mode_pack(mav_sysid, MY_COMP_ID, &msg, mav_sysid, 1, 9);
                         len = mavlink_msg_to_send_buffer(buf, &msg);
                         write(uart_fd, buf, len);
-					}
+					}*/
                 }
             }
             if (pfds[2].revents & POLLIN) {
@@ -282,7 +300,18 @@ int main(int argc, char *argv[]) {
                         len = mavlink_msg_to_send_buffer(buf, &msg);
                         write(uart_fd, buf, len);
 
-                        mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_BODY_OFFSET_NED, 0x0DF8 | 4096, 4, 0, -1,
+                        mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_BODY_OFFSET_NED, 0x0DF8 | 4096, 5, 0, -1,
+0, 0, 0, 0, 0, 0, 0, 0);
+                        len = mavlink_msg_to_send_buffer(buf, &msg);
+                        write(uart_fd, buf, len);
+                    } else if (demo_stage == 6 && prx_msg == 1) {
+                        demo_stage = 1000;
+                        gettimeofday(&tv, NULL);
+                        mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_BODY_OFFSET_NED, 0x0DF8, 1, -1.5f, -0.5f, 0, 0, 0, 0, 0, 0, 0, 0);
+                        len = mavlink_msg_to_send_buffer(buf, &msg);
+                        write(uart_fd, buf, len);
+
+                        mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_BODY_OFFSET_NED, 0x0DF8 | 4096, 5, 0, -2,
 0, 0, 0, 0, 0, 0, 0, 0);
                         len = mavlink_msg_to_send_buffer(buf, &msg);
                         write(uart_fd, buf, len);
