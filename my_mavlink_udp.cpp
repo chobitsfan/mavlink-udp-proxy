@@ -18,12 +18,12 @@
 #include <time.h>
 #include <ros/ros.h>
 #include <sensor_msgs/Imu.h>
+#include <geometry_msgs/PoseStamped.h>
 #include "mavlink/ardupilotmega/mavlink.h"
 
 #define MY_COMP_ID 191
 #define MY_NUM_PFDS 3
 #define SERVER_PATH "/tmp/chobits_server"
-#define SERVER_PATH2 "/tmp/chobits_server2"
 
 int main(int argc, char *argv[]) {
     struct pollfd pfds[MY_NUM_PFDS];
@@ -36,7 +36,8 @@ int main(int argc, char *argv[]) {
     mavlink_message_t msg;
     // Create new termios struc, we call it 'tty' for convention
     struct termios tty;
-    struct sockaddr_un ipc_addr, ipc_addr2;
+    struct sockaddr_un ipc_addr;
+    struct sockaddr_in ipc_addr2;
     uint8_t mav_sysid = 0;
     int ipc_fd, ipc_fd2;
     bool no_hr_imu = true;
@@ -44,9 +45,6 @@ int main(int argc, char *argv[]) {
     float att_q_x =0, att_q_y = 0, att_q_z = 0, att_q_w = 0;
     int64_t time_offset_us = 0;
     uint64_t last_us = 0;
-	float latest_alt = 0, gnd_alt = 0, latest_x = 0, start_x = 0;
-    int demo_stage = 0;
-    int rot_wait_cc = 0;
 
     uart_fd = open("/dev/ttyAMA0", O_RDWR);
     if (uart_fd < 0) {
@@ -95,13 +93,13 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    if ((ipc_fd2 = socket(AF_UNIX, SOCK_DGRAM, 0)) < 0) {
+    if ((ipc_fd2 = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
         return 1;
     }
     memset(&ipc_addr2, 0, sizeof(ipc_addr2));
-    ipc_addr2.sun_family = AF_UNIX;
-    strcpy(ipc_addr2.sun_path, SERVER_PATH2);
-    unlink(SERVER_PATH2);
+    ipc_addr2.sin_family = AF_INET;
+    ipc_addr2.sin_port = htons(17500);
+    ipc_addr2.sin_addr.s_addr = inet_addr("0.0.0.0");
     if (bind(ipc_fd2, (const struct sockaddr *)&ipc_addr2, sizeof(ipc_addr2)) < 0) {
         printf("bind local failed\n");
         return 1;
@@ -121,6 +119,7 @@ int main(int argc, char *argv[]) {
     ROS_INFO("It worked!");
 
     ros::Publisher imu_pub = ros_nh.advertise<sensor_msgs::Imu>("/chobits/imu", 100);
+    ros::Publisher goal_pub = ros_nh.advertise<geometry_msgs::PoseStamped>("/move_base_simple/goal", 5);
 
     while (ros::ok()) {
         retval = poll(pfds, MY_NUM_PFDS, 5000);
@@ -162,43 +161,6 @@ int main(int argc, char *argv[]) {
                                 len = mavlink_msg_to_send_buffer(buf, &msg);
                                 write(uart_fd, buf, len);
                             }
-                            if (hb.custom_mode == COPTER_MODE_GUIDED) {
-                                if (demo_stage == 0) {
-                                    demo_stage = 1;
-									gettimeofday(&tv, NULL);
-									mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, mav_sysid, 1, MAV_CMD_NAV_TAKEOFF, 0, 0, 0, 0, 0, 0, 0, 1);
-                                    len = mavlink_msg_to_send_buffer(buf, &msg);
-                                    write(uart_fd, buf, len);
-                                } else if (demo_stage == 4) {
-                                    demo_stage = 5;
-                                    gettimeofday(&tv, NULL);
-                                    mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, mav_sysid, 1, MAV_CMD_CONDITION_YAW, 0, 180, 20, 1, 0, 0, 0, 0);
-                                    len = mavlink_msg_to_send_buffer(buf, &msg);
-                                    write(uart_fd, buf, len);
-                                } else if (demo_stage == 5) {
-                                    rot_wait_cc++;
-                                    if (rot_wait_cc > 11) {
-                                        demo_stage = 6;
-                                        gettimeofday(&tv, NULL);
-                                        mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_BODY_OFFSET_NED, 0x0DF8, 5, 0, -2, 0, 0, 0, 0, 0, 0, 0, 0);
-                                        len = mavlink_msg_to_send_buffer(buf, &msg);
-                                        write(uart_fd, buf, len);
-                                    }
-                                }
-                            } else if (hb.custom_mode == COPTER_MODE_LOITER) {
-                                if (demo_stage == 3) demo_stage = 4;
-                            } else {
-                                demo_stage = 0;
-                            }
-                            if (hb.base_mode & 128) {
-								if (gnd_alt == 0) {
-									gnd_alt = latest_alt;
-									start_x = latest_x;
-                                    printf("gnd viso alt %f, start x %f\n", gnd_alt, start_x);
-								}
-                            } else {
-								gnd_alt = 0;
-                            }
                         } else if (msg.msgid == MAVLINK_MSG_ID_TIMESYNC) {
                             mavlink_timesync_t ts;
                             mavlink_msg_timesync_decode(&msg, &ts);
@@ -217,13 +179,9 @@ int main(int argc, char *argv[]) {
                             if (time_offset_us > 0 && hr_imu.time_usec > last_us) {
                                 last_us = hr_imu.time_usec;
                                 sensor_msgs::Imu imu_msg;
-#if 0
-                                imu_msg.header.stamp = ros::Time::now();
-#else
                                 int64_t ts_us = hr_imu.time_usec + time_offset_us;
                                 imu_msg.header.stamp.sec = ts_us / 1000000;
                                 imu_msg.header.stamp.nsec = (ts_us % 1000000) * 1000;
-#endif
                                 imu_msg.header.frame_id = "world";
                                 imu_msg.linear_acceleration.x = hr_imu.xacc;
                                 imu_msg.linear_acceleration.y = hr_imu.yacc;
@@ -252,8 +210,6 @@ int main(int argc, char *argv[]) {
             if (pfds[1].revents & POLLIN) {
                 float pose[10];
                 if (recv(ipc_fd, pose, sizeof(pose), 0) > 0) {
-                    latest_alt = pose[6];
-					latest_x = pose[4];
                     float covar[21] = {0};
                     pose[2]=-pose[2];
                     pose[3]=-pose[3];
@@ -265,57 +221,15 @@ int main(int argc, char *argv[]) {
                     mavlink_msg_vision_speed_estimate_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000000+tv.tv_usec, pose[7], -pose[8], -pose[9], covar, 0);
                     len = mavlink_msg_to_send_buffer(buf, &msg);
                     write(uart_fd, buf, len);
-
-					if (demo_stage == 1 && (latest_alt - gnd_alt) > 0.5f) {
-						demo_stage = 2;
-                        gettimeofday(&tv, NULL);
-                        mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_BODY_OFFSET_NED, 0x0DF8, 5, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0);
-                        len = mavlink_msg_to_send_buffer(buf, &msg);
-                        write(uart_fd, buf, len);
-						/*gettimeofday(&tv, NULL);
-                        mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_BODY_OFFSET_NED, 0x0DF8, 2, 1.5f, -0.7f, 0, 0, 0, 0, 0, 0, 0, 0);
-                        len = mavlink_msg_to_send_buffer(buf, &msg);
-                        write(uart_fd, buf, len);
-
-                        mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_BODY_OFFSET_NED, 0x0DF8 | 4096, 5, 0, -1,
-0, 0, 0, 0, 0, 0, 0, 0);
-                        len = mavlink_msg_to_send_buffer(buf, &msg);
-                        write(uart_fd, buf, len);*/
-                    } /*else if ((demo_stage == 2 || demo_stage == 3) && (latest_x - start_x) > 4.5f) {
-						demo_stage = 100;
-						gettimeofday(&tv, NULL);
-						mavlink_msg_set_mode_pack(mav_sysid, MY_COMP_ID, &msg, mav_sysid, 1, 9);
-                        len = mavlink_msg_to_send_buffer(buf, &msg);
-                        write(uart_fd, buf, len);
-					}*/
                 }
             }
             if (pfds[2].revents & POLLIN) {
-                int prx_msg;
-                if (recv(ipc_fd2, &prx_msg, sizeof(prx_msg), 0) > 0) {
-                    if (demo_stage == 2 && prx_msg == 1) {
-                        demo_stage = 3;
-                        gettimeofday(&tv, NULL);
-                        mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_BODY_OFFSET_NED, 0x0DF8, 1, 1.5f, -0.5f, 0, 0, 0, 0, 0, 0, 0, 0);
-                        len = mavlink_msg_to_send_buffer(buf, &msg);
-                        write(uart_fd, buf, len);
-
-                        mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_BODY_OFFSET_NED, 0x0DF8 | 4096, 5, 0, -1,
-0, 0, 0, 0, 0, 0, 0, 0);
-                        len = mavlink_msg_to_send_buffer(buf, &msg);
-                        write(uart_fd, buf, len);
-                    } else if (demo_stage == 6 && prx_msg == 1) {
-                        demo_stage = 1000;
-                        gettimeofday(&tv, NULL);
-                        mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_BODY_OFFSET_NED, 0x0DF8, 1, -1.5f, -0.5f, 0, 0, 0, 0, 0, 0, 0, 0);
-                        len = mavlink_msg_to_send_buffer(buf, &msg);
-                        write(uart_fd, buf, len);
-
-                        mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_BODY_OFFSET_NED, 0x0DF8 | 4096, 5, 0, -2,
-0, 0, 0, 0, 0, 0, 0, 0);
-                        len = mavlink_msg_to_send_buffer(buf, &msg);
-                        write(uart_fd, buf, len);
-                    }
+                float planner_msg[3];
+                if (recv(ipc_fd2, &planner_msg, sizeof(planner_msg), 0) > 0) {
+                    gettimeofday(&tv, NULL);
+                    mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_LOCAL_NED, 0x0DC7, 0, 0, 0, planner_msg[0], -planner_msg[1], -planner_msg[2], 0, 0, 0, 0, 0);
+                    len = mavlink_msg_to_send_buffer(buf, &msg);
+                    write(uart_fd, buf, len);
                 }
             }
         }
