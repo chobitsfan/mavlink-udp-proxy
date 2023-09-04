@@ -45,6 +45,7 @@ int main(int argc, char *argv[]) {
     float att_q_x =0, att_q_y = 0, att_q_z = 0, att_q_w = 0;
     int64_t time_offset_us = 0;
     uint64_t last_us = 0;
+    bool send_goal = true;
 
     uart_fd = open("/dev/ttyAMA0", O_RDWR);
     if (uart_fd < 0) {
@@ -161,6 +162,18 @@ int main(int argc, char *argv[]) {
                                 len = mavlink_msg_to_send_buffer(buf, &msg);
                                 write(uart_fd, buf, len);
                             }
+                            if (hb.custom_mode == COPTER_MODE_GUIDED) {
+                                if (send_goal) {
+                                    send_goal = false;
+                                    geometry_msgs::PoseStamped ros_tgt;
+                                    ros_tgt.header.stamp = ros::Time::now();
+                                    ros_tgt.header.frame_id = "world";
+                                    ros_tgt.pose.position.x = 6.5;
+                                    ros_tgt.pose.position.y = 0;
+                                    ros_tgt.pose.position.z = 1.2;
+                                    goal_pub.publish(ros_tgt);
+                                }
+                            } else send_goal = true;
                         } else if (msg.msgid == MAVLINK_MSG_ID_TIMESYNC) {
                             mavlink_timesync_t ts;
                             mavlink_msg_timesync_decode(&msg, &ts);
@@ -221,13 +234,20 @@ int main(int argc, char *argv[]) {
                     mavlink_msg_vision_speed_estimate_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000000+tv.tv_usec, pose[7], -pose[8], -pose[9], covar, 0);
                     len = mavlink_msg_to_send_buffer(buf, &msg);
                     write(uart_fd, buf, len);
+
+                    if (pose[4] > 6) {
+                        gettimeofday(&tv, NULL);
+                        mavlink_msg_set_mode_pack(mav_sysid, MY_COMP_ID, &msg, mav_sysid, 1, 9); //land
+                        len = mavlink_msg_to_send_buffer(buf, &msg);
+                        write(uart_fd, buf, len);
+                    }
                 }
             }
             if (pfds[2].revents & POLLIN) {
-                float planner_msg[3];
+                float planner_msg[6];
                 if (recv(ipc_fd2, &planner_msg, sizeof(planner_msg), 0) > 0) {
                     gettimeofday(&tv, NULL);
-                    mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_LOCAL_NED, 0x0DC7, 0, 0, 0, planner_msg[0], -planner_msg[1], -planner_msg[2], 0, 0, 0, 0, 0);
+                    mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_LOCAL_NED, 0xc07, 0, 0, 0, planner_msg[0], -planner_msg[1], -planner_msg[2], planner_msg[3], -planner_msg[4], -planner_msg[5], 0, 0);
                     len = mavlink_msg_to_send_buffer(buf, &msg);
                     write(uart_fd, buf, len);
                 }
