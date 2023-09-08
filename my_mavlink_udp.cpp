@@ -45,7 +45,11 @@ int main(int argc, char *argv[]) {
     float att_q_x =0, att_q_y = 0, att_q_z = 0, att_q_w = 0;
     int64_t time_offset_us = 0;
     uint64_t last_us = 0;
-    bool send_goal = true;
+    int send_goal = 5;
+    bool no_local_pos = true;
+    float local_n = 0, local_e = 0, local_d = 0;
+    float vis_n = 0, vis_e = 0, vis_d = 0;
+    float diff_local_vis_n =0, diff_local_vis_e = 0, diff_local_vis_d = 0;
 
     uart_fd = open("/dev/ttyAMA0", O_RDWR);
     if (uart_fd < 0) {
@@ -162,18 +166,30 @@ int main(int argc, char *argv[]) {
                                 len = mavlink_msg_to_send_buffer(buf, &msg);
                                 write(uart_fd, buf, len);
                             }
+                            if (no_local_pos) {
+                                mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, 0, 0, MAV_CMD_SET_MESSAGE_INTERVAL, 0, MAVLINK_MSG_ID_LOCAL_POSITION_NED, 100000, 0, 0, 0, 0, 0);
+                                len = mavlink_msg_to_send_buffer(buf, &msg);
+                                write(uart_fd, buf, len);
+                            }
                             if (hb.custom_mode == COPTER_MODE_GUIDED) {
-                                if (send_goal) {
-                                    send_goal = false;
+                                if (send_goal == 0) {
                                     geometry_msgs::PoseStamped ros_tgt;
                                     ros_tgt.header.stamp = ros::Time::now();
                                     ros_tgt.header.frame_id = "world";
                                     ros_tgt.pose.position.x = 6.5;
                                     ros_tgt.pose.position.y = 0;
-                                    ros_tgt.pose.position.z = 1.2;
+                                    ros_tgt.pose.position.z = 1.3;
                                     goal_pub.publish(ros_tgt);
+                                    diff_local_vis_n = local_n - vis_n;
+                                    diff_local_vis_e = local_e - vis_e;
+                                    diff_local_vis_d = local_d - vis_d;
+                                    printf("diff_local_vis_d %f\n", diff_local_vis_d);
+                                } else {
+                                    send_goal--;
                                 }
-                            } else send_goal = true;
+                            } else {
+                                send_goal = 5;
+                            }
                         } else if (msg.msgid == MAVLINK_MSG_ID_TIMESYNC) {
                             mavlink_timesync_t ts;
                             mavlink_msg_timesync_decode(&msg, &ts);
@@ -216,6 +232,13 @@ int main(int argc, char *argv[]) {
                             att_q_x = att_q.q2;
                             att_q_y = att_q.q3;
                             att_q_z = att_q.q4;
+                        } else if (msg.msgid == MAVLINK_MSG_ID_LOCAL_POSITION_NED) {
+                            no_local_pos = false;
+                            mavlink_local_position_ned_t local_pos;
+                            mavlink_msg_local_position_ned_decode(&msg, &local_pos);
+                            local_n = local_pos.x;
+                            local_e = local_pos.y;
+                            local_d = local_pos.z;
                         }
                     }
                 }
@@ -223,6 +246,9 @@ int main(int argc, char *argv[]) {
             if (pfds[1].revents & POLLIN) {
                 float pose[10];
                 if (recv(ipc_fd, pose, sizeof(pose), 0) > 0) {
+                    vis_n = pose[4];
+                    vis_e = -pose[5];
+                    vis_d = -pose[6];
                     float covar[21] = {0};
                     pose[2]=-pose[2];
                     pose[3]=-pose[3];
@@ -244,10 +270,10 @@ int main(int argc, char *argv[]) {
                 }
             }
             if (pfds[2].revents & POLLIN) {
-                float planner_msg[6];
+                float planner_msg[9];
                 if (recv(ipc_fd2, &planner_msg, sizeof(planner_msg), 0) > 0) {
                     gettimeofday(&tv, NULL);
-                    mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_LOCAL_NED, 0xc07, 0, 0, 0, planner_msg[0], -planner_msg[1], -planner_msg[2], planner_msg[3], -planner_msg[4], -planner_msg[5], 0, 0);
+                    mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_LOCAL_NED, 0xc00, planner_msg[0]+diff_local_vis_n, -planner_msg[1]+diff_local_vis_e, -planner_msg[2]+diff_local_vis_d, planner_msg[3], -planner_msg[4], -planner_msg[5], planner_msg[6], -planner_msg[7], -planner_msg[8], 0, 0);
                     len = mavlink_msg_to_send_buffer(buf, &msg);
                     write(uart_fd, buf, len);
                 }
