@@ -19,6 +19,7 @@
 #include <ros/ros.h>
 #include <sensor_msgs/Imu.h>
 #include <geometry_msgs/PoseStamped.h>
+#include <nav_msgs/Path.h>
 #include "mavlink/ardupilotmega/mavlink.h"
 
 #define MY_COMP_ID 191
@@ -124,7 +125,7 @@ int main(int argc, char *argv[]) {
     ROS_INFO("It worked!");
 
     ros::Publisher imu_pub = ros_nh.advertise<sensor_msgs::Imu>("/chobits/imu", 100);
-    ros::Publisher goal_pub = ros_nh.advertise<geometry_msgs::PoseStamped>("/move_base_simple/goal", 5);
+    ros::Publisher goal_pub = ros_nh.advertise<nav_msgs::Path>("/waypoint_generator/waypoints", 1);
 
     while (ros::ok()) {
         retval = poll(pfds, MY_NUM_PFDS, 5000);
@@ -173,13 +174,17 @@ int main(int argc, char *argv[]) {
                             }
                             if (hb.custom_mode == COPTER_MODE_GUIDED) {
                                 if (send_goal == 0) {
+                                    nav_msgs::Path ros_wps;
                                     geometry_msgs::PoseStamped ros_tgt;
+                                    ros_wps.header.stamp = ros::Time::now();
+                                    ros_wps.header.frame_id = "world";
                                     ros_tgt.header.stamp = ros::Time::now();
                                     ros_tgt.header.frame_id = "world";
                                     ros_tgt.pose.position.x = 6.5;
                                     ros_tgt.pose.position.y = 0;
                                     ros_tgt.pose.position.z = 1.3;
-                                    goal_pub.publish(ros_tgt);
+                                    ros_wps.poses.push_back(ros_tgt);
+                                    goal_pub.publish(ros_wps);
                                     diff_local_vis_n = local_n - vis_n;
                                     diff_local_vis_e = local_e - vis_e;
                                     diff_local_vis_d = local_d - vis_d;
