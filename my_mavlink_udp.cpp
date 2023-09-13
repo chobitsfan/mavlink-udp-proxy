@@ -173,6 +173,7 @@ int main(int argc, char *argv[]) {
                                 write(uart_fd, buf, len);
                             }
                             if (hb.custom_mode == COPTER_MODE_GUIDED) {
+                                send_goal--;
                                 if (send_goal == 0) {
                                     nav_msgs::Path ros_wps;
                                     geometry_msgs::PoseStamped ros_tgt;
@@ -188,9 +189,7 @@ int main(int argc, char *argv[]) {
                                     diff_local_vis_n = local_n - vis_n;
                                     diff_local_vis_e = local_e - vis_e;
                                     diff_local_vis_d = local_d - vis_d;
-                                    printf("diff_local_vis_d %f\n", diff_local_vis_d);
-                                } else {
-                                    send_goal--;
+                                    printf("diff_local_vis %.2f %.2f %.2f\n", diff_local_vis_n, diff_local_vis_e, diff_local_vis_d);
                                 }
                             } else {
                                 send_goal = 5;
