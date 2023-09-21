@@ -25,6 +25,7 @@
 #define MY_COMP_ID 191
 #define MY_NUM_PFDS 3
 #define SERVER_PATH "/tmp/chobits_server"
+#define SERVER_PATH2 "/tmp/chobits_server2"
 
 int main(int argc, char *argv[]) {
     struct pollfd pfds[MY_NUM_PFDS];
@@ -37,8 +38,7 @@ int main(int argc, char *argv[]) {
     mavlink_message_t msg;
     // Create new termios struc, we call it 'tty' for convention
     struct termios tty;
-    struct sockaddr_un ipc_addr;
-    struct sockaddr_in ipc_addr2;
+    struct sockaddr_un ipc_addr, ipc_addr2;
     uint8_t mav_sysid = 0;
     int ipc_fd, ipc_fd2;
     bool no_hr_imu = true;
@@ -100,13 +100,13 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    if ((ipc_fd2 = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+    if ((ipc_fd2 = socket(AF_UNIX, SOCK_DGRAM, 0)) < 0) {
         return 1;
     }
     memset(&ipc_addr2, 0, sizeof(ipc_addr2));
-    ipc_addr2.sin_family = AF_INET;
-    ipc_addr2.sin_port = htons(17500);
-    ipc_addr2.sin_addr.s_addr = inet_addr("0.0.0.0");
+    ipc_addr2.sun_family = AF_UNIX;
+    strcpy(ipc_addr2.sun_path, SERVER_PATH2);
+    unlink(SERVER_PATH2);
     if (bind(ipc_fd2, (const struct sockaddr *)&ipc_addr2, sizeof(ipc_addr2)) < 0) {
         printf("bind local failed\n");
         return 1;
