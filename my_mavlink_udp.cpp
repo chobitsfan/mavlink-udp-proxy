@@ -123,9 +123,9 @@ int main(int argc, char *argv[]) {
 
     printf("hello\n");
 
-    ros::init(argc, argv, "test_node_outside_catkin_ws");
+    ros::init(argc, argv, "mavlink_udp");
     ros::NodeHandle ros_nh;
-    ROS_INFO("It worked!");
+    ROS_INFO("mavlink_udp ready");
 
     ros::Publisher imu_pub = ros_nh.advertise<sensor_msgs::Imu>("/chobits/imu", 100);
     ros::Publisher goal_pub = ros_nh.advertise<nav_msgs::Path>("/waypoint_generator/waypoints", 1);
@@ -301,7 +301,7 @@ int main(int argc, char *argv[]) {
                             geometry_msgs::PoseStamped ros_tgt;
                             ros_tgt.header.stamp = ros::Time::now();
                             ros_tgt.header.frame_id = "world";
-                            ros_tgt.pose.position.x = 6;
+                            ros_tgt.pose.position.x = 5.5;
                             ros_tgt.pose.position.y = 0;
                             ros_tgt.pose.position.z = 1.4;
                             ros_wps.poses.push_back(ros_tgt);
