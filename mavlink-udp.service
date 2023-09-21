@@ -1,12 +1,16 @@
 [Unit]
 Description=mavlink udp proxy
 Wants=multi-user.target
-After=multi-user.target
+BindsTo=vins-mono.service
+After=multi-user.target vins-mono.service
 
 [Service]
 Type=simple 
 ExecStart=/home/pi/src/mavlink-udp-proxy/mavlink_udp
-Restart=always
+KillSignal=SIGINT
+User=pi
+WorkingDirectory=/home/pi/
+ExecStartPre=/bin/sleep 5
 
 [Install]
 WantedBy=multi-user.target
