@@ -26,6 +26,7 @@
 #define MY_NUM_PFDS 3
 #define SERVER_PATH "/tmp/chobits_server"
 #define SERVER_PATH2 "/tmp/chobits_server2"
+#define VEL_D_BIAS -0.35f
 
 int main(int argc, char *argv[]) {
     struct pollfd pfds[MY_NUM_PFDS];
@@ -197,12 +198,7 @@ int main(int argc, char *argv[]) {
                                         ros_tgt.pose.position.z = 1.3;
                                         ros_wps.poses.push_back(ros_tgt);
                                         goal_pub.publish(ros_wps);
-                                    } /*else if (send_goal < 4) {
-                                        gettimeofday(&tv, NULL);
-                                        mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_LOCAL_NED, 0xDC7, 0, 0, 0, 0, 0, -0.1, 0, 0, 0, 0, 0);
-                                        len = mavlink_msg_to_send_buffer(buf, &msg);
-                                        write(uart_fd, buf, len);
-                                    }*/
+                                    }
                                 }
                             } else if (hb.custom_mode == COPTER_MODE_STABILIZE) {
                                 demo_stage = 0;
@@ -297,7 +293,7 @@ int main(int argc, char *argv[]) {
                 float planner_msg[9];
                 if (recv(ipc_fd2, &planner_msg, sizeof(planner_msg), 0) > 0) {
                     gettimeofday(&tv, NULL);
-                    mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_LOCAL_NED, 0xc00, planner_msg[0], -planner_msg[1], -planner_msg[2]+diff_local_vis_d-0.2f, planner_msg[3], -planner_msg[4], -planner_msg[5]-0.1f, planner_msg[6], -planner_msg[7], -planner_msg[8], 0, 0);
+                    mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_LOCAL_NED, 0xc00, planner_msg[0], -planner_msg[1], -planner_msg[2]+diff_local_vis_d, planner_msg[3], -planner_msg[4], -planner_msg[5]+VEL_D_BIAS, planner_msg[6], -planner_msg[7], -planner_msg[8], 0, 0);
                     len = mavlink_msg_to_send_buffer(buf, &msg);
                     write(uart_fd, buf, len);
                 }
