@@ -26,7 +26,8 @@
 #define MY_NUM_PFDS 3
 #define SERVER_PATH "/tmp/chobits_server"
 #define SERVER_PATH2 "/tmp/chobits_server2"
-#define VEL_D_BIAS -0.35f
+#define VEL_D_BIAS -0.3f
+#define VEL_N_BIAS -0.05f
 
 int main(int argc, char *argv[]) {
     struct pollfd pfds[MY_NUM_PFDS];
@@ -178,7 +179,7 @@ int main(int argc, char *argv[]) {
                                 if (demo_stage == 0) {
                                     if (hb.base_mode & 128) {
                                         demo_stage = 1;
-                                        send_goal = 7;
+                                        send_goal = 10;
                                         mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, mav_sysid, 1, MAV_CMD_NAV_TAKEOFF, 0, 0, 0, 0, 0, 0, 0, 1);
                                         len = mavlink_msg_to_send_buffer(buf, &msg);
                                         write(uart_fd, buf, len);
@@ -186,23 +187,22 @@ int main(int argc, char *argv[]) {
                                 } else if (demo_stage == 1) {
                                     send_goal--;
                                     if (send_goal == 0) {
-                                        demo_stage = 100;
+                                        demo_stage = 2;
                                         nav_msgs::Path ros_wps;
-                                        geometry_msgs::PoseStamped ros_tgt;
                                         ros_wps.header.stamp = ros::Time::now();
                                         ros_wps.header.frame_id = "world";
+                                        geometry_msgs::PoseStamped ros_tgt;
                                         ros_tgt.header.stamp = ros::Time::now();
                                         ros_tgt.header.frame_id = "world";
-                                        ros_tgt.pose.position.x = 6;
-                                        ros_tgt.pose.position.y = 0;
-                                        ros_tgt.pose.position.z = 1.3;
+                                        ros_tgt.pose.position.x = 0.5;
+                                        ros_tgt.pose.position.y = 1;
+                                        ros_tgt.pose.position.z = 1.4;
                                         ros_wps.poses.push_back(ros_tgt);
                                         goal_pub.publish(ros_wps);
                                     }
                                 }
                             } else if (hb.custom_mode == COPTER_MODE_STABILIZE) {
                                 demo_stage = 0;
-                                send_goal = 7;
                                 if (hb.base_mode & 128) {
                                     diff_local_vis_n = local_n - vis_n;
                                     diff_local_vis_e = local_e - vis_e;
@@ -292,10 +292,33 @@ int main(int argc, char *argv[]) {
             if (pfds[2].revents & POLLIN) {
                 float planner_msg[9];
                 if (recv(ipc_fd2, &planner_msg, sizeof(planner_msg), 0) > 0) {
+                    if (planner_msg[3] == 0 && planner_msg[4] == 0 && planner_msg[5] == 0) {
+                        if (demo_stage == 2) {
+                            demo_stage = 3;
+                            nav_msgs::Path ros_wps;
+                            ros_wps.header.stamp = ros::Time::now();
+                            ros_wps.header.frame_id = "world";
+                            geometry_msgs::PoseStamped ros_tgt;
+                            ros_tgt.header.stamp = ros::Time::now();
+                            ros_tgt.header.frame_id = "world";
+                            ros_tgt.pose.position.x = 6;
+                            ros_tgt.pose.position.y = 0;
+                            ros_tgt.pose.position.z = 1.4;
+                            ros_wps.poses.push_back(ros_tgt);
+                            goal_pub.publish(ros_wps);
+                        } else if (demo_stage == 3) {
+                            demo_stage = 100;
+                            gettimeofday(&tv, NULL);
+                            mavlink_msg_set_mode_pack(mav_sysid, MY_COMP_ID, &msg, mav_sysid, 1, 9); //land
+                            len = mavlink_msg_to_send_buffer(buf, &msg);
+                            write(uart_fd, buf, len);
+                        }
+                    } else {
                     gettimeofday(&tv, NULL);
-                    mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_LOCAL_NED, 0xc00, planner_msg[0], -planner_msg[1], -planner_msg[2]+diff_local_vis_d, planner_msg[3], -planner_msg[4], -planner_msg[5]+VEL_D_BIAS, planner_msg[6], -planner_msg[7], -planner_msg[8], 0, 0);
+                    mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_LOCAL_NED, 0xc00, planner_msg[0], -planner_msg[1], -planner_msg[2]+diff_local_vis_d, planner_msg[3]+VEL_N_BIAS, -planner_msg[4], -planner_msg[5]+VEL_D_BIAS, planner_msg[6], -planner_msg[7], -planner_msg[8], 0, 0);
                     len = mavlink_msg_to_send_buffer(buf, &msg);
                     write(uart_fd, buf, len);
+                    }
                 }
             }
         }
