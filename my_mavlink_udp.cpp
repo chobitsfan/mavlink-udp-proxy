@@ -201,7 +201,7 @@ int main(int argc, char *argv[]) {
                                         goal_pub.publish(ros_wps);
                                     }
                                 }
-                            } else if (hb.custom_mode == COPTER_MODE_STABILIZE) {
+                            } else if (hb.custom_mode == COPTER_MODE_STABILIZE || hb.custom_mode == COPTER_MODE_LOITER) {
                                 demo_stage = 0;
                                 if (hb.base_mode & 128) {
                                     diff_local_vis_n = local_n - vis_n;
