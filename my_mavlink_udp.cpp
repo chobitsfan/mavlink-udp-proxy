@@ -187,15 +187,15 @@ int main(int argc, char *argv[]) {
                                 } else if (demo_stage == 1) {
                                     send_goal--;
                                     if (send_goal == 0) {
-                                        demo_stage = 2;
+                                        demo_stage = 3;
                                         nav_msgs::Path ros_wps;
                                         ros_wps.header.stamp = ros::Time::now();
                                         ros_wps.header.frame_id = "world";
                                         geometry_msgs::PoseStamped ros_tgt;
                                         ros_tgt.header.stamp = ros::Time::now();
                                         ros_tgt.header.frame_id = "world";
-                                        ros_tgt.pose.position.x = 0.5;
-                                        ros_tgt.pose.position.y = 1;
+                                        ros_tgt.pose.position.x = 5.5;
+                                        ros_tgt.pose.position.y = 0.5;
                                         ros_tgt.pose.position.z = 1.4;
                                         ros_wps.poses.push_back(ros_tgt);
                                         goal_pub.publish(ros_wps);
