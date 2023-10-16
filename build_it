@@ -1,2 +1,2 @@
 #!/bin/bash
-g++ -O1 -g0 -Wall -Wno-address-of-packed-member -Wno-unused-result my_mavlink_udp.cpp -o mavlink_udp -lm -lroscpp -lrostime -lrosconsole -lroscpp_serialization
+g++ -O1 -g0 -Wall -Wno-address-of-packed-member -Wno-unused-result my_mavlink_udp.cpp -o mavlink_udp -I/opt/ros/noetic/include -L/opt/ros/noetic/lib -lm -lroscpp -lrostime -lrosconsole -lroscpp_serialization
