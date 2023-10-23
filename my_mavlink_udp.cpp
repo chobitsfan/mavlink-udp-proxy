@@ -55,7 +55,7 @@ int main(int argc, char *argv[]) {
     float diff_local_vis_n =0, diff_local_vis_e = 0, diff_local_vis_d = 0;
     int demo_stage = 0;
 
-    uart_fd = open("/dev/ttyAMA0", O_RDWR);
+    uart_fd = open("/dev/ttyTHS0", O_RDWR);
     if (uart_fd < 0) {
         printf("can not open serial port\n");
         return 1;
@@ -146,6 +146,7 @@ int main(int argc, char *argv[]) {
                                 mav_sysid = msg.sysid;
                                 printf("found MAV %d\n", msg.sysid);
                             }
+#if 0
                             if (time_offset_us == 0) {
                                 gettimeofday(&tv, NULL);
                                 mavlink_msg_timesync_pack(mav_sysid, MY_COMP_ID, &msg, 0, tv.tv_sec*1000000+tv.tv_usec, mav_sysid, 1); //fill timesync with us instead of ns
@@ -175,6 +176,7 @@ int main(int argc, char *argv[]) {
                                 len = mavlink_msg_to_send_buffer(buf, &msg);
                                 write(uart_fd, buf, len);
                             }
+#endif
                             if (hb.custom_mode == COPTER_MODE_GUIDED) {
                                 if (demo_stage == 0) {
                                     if (hb.base_mode & 128) {
@@ -213,11 +215,23 @@ int main(int argc, char *argv[]) {
                                 demo_stage = 0;
                             }
                         } else if (msg.msgid == MAVLINK_MSG_ID_TIMESYNC) {
+#if 0
                             mavlink_timesync_t ts;
                             mavlink_msg_timesync_decode(&msg, &ts);
                             if (ts.tc1 != 0) {
                                 time_offset_us = ts.ts1 - ts.tc1;
                                 printf("time offset %ld\n", time_offset_us);
+                            }
+#endif
+                            if (mav_sysid != 0) {
+                                gettimeofday(&tv, NULL);
+                                mavlink_msg_system_time_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000000+tv.tv_usec, 0);
+                                len = mavlink_msg_to_send_buffer(buf, &msg);
+                                write(uart_fd, buf, len);
+
+                                //mavlink_msg_set_gps_global_origin_pack(mav_sysid, MY_COMP_ID, &msg, mav_sysid, 247749434, 1210443077, 100000, tv.tv_sec*1000000+tv.tv_usec);
+                                //len = mavlink_msg_to_send_buffer(buf, &msg);
+                                //write(uart_fd, buf, len);
                             }
                         } else if (msg.msgid == MAVLINK_MSG_ID_STATUSTEXT) {
                             mavlink_statustext_t txt;
@@ -274,21 +288,24 @@ int main(int argc, char *argv[]) {
                     float covar[21] = {0};
                     pose[2]=-pose[2];
                     pose[3]=-pose[3];
-                    gettimeofday(&tv, NULL);
-                    mavlink_msg_att_pos_mocap_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000000+tv.tv_usec, pose, pose[4], -pose[5], -pose[6], covar);
-                    len = mavlink_msg_to_send_buffer(buf, &msg);
-                    write(uart_fd, buf, len);
-                    gettimeofday(&tv, NULL);
-                    mavlink_msg_vision_speed_estimate_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000000+tv.tv_usec, pose[7], -pose[8], -pose[9], covar, 0);
-                    len = mavlink_msg_to_send_buffer(buf, &msg);
-                    write(uart_fd, buf, len);
-
+                    if (mav_sysid != 0) {
+                        gettimeofday(&tv, NULL);
+                        mavlink_msg_att_pos_mocap_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000000+tv.tv_usec, pose, pose[4], -pose[5], -pose[6], covar);
+                        len = mavlink_msg_to_send_buffer(buf, &msg);
+                        write(uart_fd, buf, len);
+                        gettimeofday(&tv, NULL);
+                        mavlink_msg_vision_speed_estimate_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000000+tv.tv_usec, pose[7], -pose[8], -pose[9], covar, 0);
+                        len = mavlink_msg_to_send_buffer(buf, &msg);
+                        write(uart_fd, buf, len);
+                    }
+#if 0
                     if (pose[4] > 6) {
                         gettimeofday(&tv, NULL);
                         mavlink_msg_set_mode_pack(mav_sysid, MY_COMP_ID, &msg, mav_sysid, 1, 9); //land
                         len = mavlink_msg_to_send_buffer(buf, &msg);
                         write(uart_fd, buf, len);
                     }
+#endif
                 }
             }
             if (pfds[2].revents & POLLIN) {
