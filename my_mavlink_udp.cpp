@@ -56,9 +56,9 @@ int main(int argc, char *argv[]) {
     int demo_stage = 0;
 
     if (argc > 1)
-        uart_fd = open(argv[1], O_RDWR);
+        uart_fd = open(argv[1], O_RDWR| O_NOCTTY);
     else
-        uart_fd = open("/dev/ttyTHS0", O_RDWR);
+        uart_fd = open("/dev/ttyUSB0", O_RDWR | O_NOCTTY);
     if (uart_fd < 0) {
         printf("can not open serial port\n");
         return 1;
@@ -85,8 +85,8 @@ int main(int argc, char *argv[]) {
     tty.c_oflag &= ~ONLCR; // Prevent conversion of newline to carriage return/line feed
     tty.c_cc[VTIME] = 10;    // Wait for up to 1s (10 deciseconds), returning as soon as any data is received.
     tty.c_cc[VMIN] = 0;
-    cfsetispeed(&tty, B1500000);
-    cfsetospeed(&tty, B1500000);
+    cfsetispeed(&tty, B921600);
+    cfsetospeed(&tty, B921600);
     // Save tty settings, also checking for error
     if (tcsetattr(uart_fd, TCSANOW, &tty) != 0) {
         printf("Error %i from tcsetattr: %s\n", errno, strerror(errno));
@@ -173,11 +173,11 @@ int main(int argc, char *argv[]) {
                                 len = mavlink_msg_to_send_buffer(buf, &msg);
                                 write(uart_fd, buf, len);
                             }
-                            if (no_local_pos) {
-                                mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, 0, 0, MAV_CMD_SET_MESSAGE_INTERVAL, 0, MAVLINK_MSG_ID_LOCAL_POSITION_NED, 1000000, 0, 0, 0, 0, 0);
-                                len = mavlink_msg_to_send_buffer(buf, &msg);
-                                write(uart_fd, buf, len);
-                            }
+                            //if (no_local_pos) {
+                            //    mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, 0, 0, MAV_CMD_SET_MESSAGE_INTERVAL, 0, MAVLINK_MSG_ID_LOCAL_POSITION_NED, 1000000, 0, 0, 0, 0, 0);
+                            //    len = mavlink_msg_to_send_buffer(buf, &msg);
+                            //    write(uart_fd, buf, len);
+                            //}
                             if (hb.custom_mode == COPTER_MODE_GUIDED) {
                                 if (demo_stage == 0) {
                                     if (hb.base_mode & 128) {
