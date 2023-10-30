@@ -20,6 +20,7 @@
 #include <sensor_msgs/Imu.h>
 #include <geometry_msgs/PoseStamped.h>
 #include <nav_msgs/Path.h>
+#include <nav_msgs/Odometry.h>
 #include "mavlink/ardupilotmega/mavlink.h"
 
 #define MY_COMP_ID 191
@@ -132,6 +133,7 @@ int main(int argc, char *argv[]) {
 
     ros::Publisher imu_pub = ros_nh.advertise<sensor_msgs::Imu>("/chobits/imu", 100);
     ros::Publisher goal_pub = ros_nh.advertise<nav_msgs::Path>("/waypoint_generator/waypoints", 1);
+    ros::Publisher odo_pub = ros_nh.advertise<nav_msgs::Odometry>("/chobits/odometry", 10);
 
     while (ros::ok()) {
         retval = poll(pfds, MY_NUM_PFDS, 5000);
@@ -173,11 +175,11 @@ int main(int argc, char *argv[]) {
                                 len = mavlink_msg_to_send_buffer(buf, &msg);
                                 write(uart_fd, buf, len);
                             }
-                            //if (no_local_pos) {
-                            //    mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, 0, 0, MAV_CMD_SET_MESSAGE_INTERVAL, 0, MAVLINK_MSG_ID_LOCAL_POSITION_NED, 1000000, 0, 0, 0, 0, 0);
-                            //    len = mavlink_msg_to_send_buffer(buf, &msg);
-                            //    write(uart_fd, buf, len);
-                            //}
+                            if (no_local_pos) {
+                                mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, 0, 0, MAV_CMD_SET_MESSAGE_INTERVAL, 0, MAVLINK_MSG_ID_LOCAL_POSITION_NED, 100000, 0, 0, 0, 0, 0);
+                                len = mavlink_msg_to_send_buffer(buf, &msg);
+                                write(uart_fd, buf, len);
+                            }
                             if (hb.custom_mode == COPTER_MODE_GUIDED) {
                                 if (demo_stage == 0) {
                                     if (hb.base_mode & 128) {
@@ -261,6 +263,21 @@ int main(int argc, char *argv[]) {
                             no_local_pos = false;
                             mavlink_local_position_ned_t local_pos;
                             mavlink_msg_local_position_ned_decode(&msg, &local_pos);
+                            nav_msgs::Odometry odo;
+                            odo.header.stamp = ros::Time::now();
+                            odo.header.frame_id = "world";
+                            odo.child_frame_id = "world";
+                            odo.pose.pose.position.x = local_pos.x;
+                            odo.pose.pose.position.y = -local_pos.y;
+                            odo.pose.pose.position.z = -local_pos.z;
+                            odo.pose.pose.orientation.x = att_q_x;
+                            odo.pose.pose.orientation.y = -att_q_y;
+                            odo.pose.pose.orientation.z = -att_q_z;
+                            odo.pose.pose.orientation.w = att_q_w;
+                            odo.twist.twist.linear.x = local_pos.vx;
+                            odo.twist.twist.linear.y = -local_pos.vy;
+                            odo.twist.twist.linear.z = -local_pos.vz;
+                            odo_pub.publish(odo);
                             local_n = local_pos.x;
                             local_e = local_pos.y;
                             local_d = local_pos.z;
