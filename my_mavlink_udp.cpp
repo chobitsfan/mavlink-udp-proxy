@@ -48,14 +48,13 @@ int main(int argc, char *argv[]) {
     uint64_t last_us = 0;
     int send_goal = 2;
     bool no_local_pos = true;
-    //float local_n = 0, local_e = 0, local_d = 0;
-    //float vis_n = 0, vis_e = 0, vis_d = 0;
-    //float diff_local_vis_n =0, diff_local_vis_e = 0, diff_local_vis_d = 0;
     int demo_stage = 0;
     float xacc = 0, yacc = 0, zacc = 0;
     int parse_error = 0, packet_rx_drop_count = 0;
     float latest_local_z = 0;
     int64_t tc1_sent = 0;
+    float vins_apm_alt_diff = 0;
+    float latest_vins_alt = 0;
 
     if (argc > 1)
         uart_fd = open(argv[1], O_RDWR| O_NOCTTY);
@@ -203,7 +202,7 @@ int main(int argc, char *argv[]) {
                                         ros_tgt.header.frame_id = "world";
                                         ros_tgt.pose.position.x = 5;
                                         ros_tgt.pose.position.y = 0;
-                                        ros_tgt.pose.position.z = -latest_local_z;
+                                        ros_tgt.pose.position.z = -latest_local_z + vins_apm_alt_diff;
                                         goal_pub.publish(ros_tgt);
                                     }
                                 }
@@ -270,13 +269,19 @@ int main(int argc, char *argv[]) {
                             no_local_pos = false;
                             mavlink_local_position_ned_t local_pos;
                             mavlink_msg_local_position_ned_decode(&msg, &local_pos);
+                            
+                            if (vins_apm_alt_diff == 0) {
+                                vins_apm_alt_diff = latest_vins_alt - ( -local_pos.z );
+                                printf("alt: vins, apm, diff %f %f %f\n", latest_vins_alt, -local_pos.z, vins_apm_alt_diff);
+                            }
+                            
                             nav_msgs::Odometry odo;
                             odo.header.stamp = ros::Time::now();
                             odo.header.frame_id = "world";
                             odo.child_frame_id = "world";
                             odo.pose.pose.position.x = local_pos.x;
                             odo.pose.pose.position.y = -local_pos.y;
-                            odo.pose.pose.position.z = -local_pos.z;
+                            odo.pose.pose.position.z = -local_pos.z + vins_apm_alt_diff;
                             odo.pose.pose.orientation.x = att_q_x;
                             odo.pose.pose.orientation.y = -att_q_y;
                             odo.pose.pose.orientation.z = -att_q_z;
@@ -288,9 +293,7 @@ int main(int argc, char *argv[]) {
                             odo.twist.twist.angular.y = -yacc;
                             odo.twist.twist.angular.z = -zacc;
                             odo_pub.publish(odo);
-                            //local_n = local_pos.x;
-                            //local_e = local_pos.y;
-                            //local_d = local_pos.z;
+                            
                             latest_local_z = local_pos.z;
                         }
                     }
@@ -299,9 +302,7 @@ int main(int argc, char *argv[]) {
             if (pfds[1].revents & POLLIN) {
                 float pose[10];
                 if (recv(ipc_fd, pose, sizeof(pose), 0) > 0) {
-                    //vis_n = pose[4];
-                    //vis_e = -pose[5];
-                    //vis_d = -pose[6];
+                    latest_vins_alt = pose[3];
                     float covar[21] = {0};
                     pose[2]=-pose[2];
                     pose[3]=-pose[3];
@@ -330,7 +331,7 @@ int main(int argc, char *argv[]) {
                         }
                     } else {
                         gettimeofday(&tv, NULL);
-                        mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_LOCAL_NED, 0xc00, planner_msg[0], -planner_msg[1], -planner_msg[2], planner_msg[3], -planner_msg[4], -planner_msg[5], planner_msg[6], -planner_msg[7], -planner_msg[8], 0, 0);
+                        mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, 0, 0, MAV_FRAME_LOCAL_NED, 0xc00, planner_msg[0], -planner_msg[1], -(planner_msg[2]-vins_apm_alt_diff), planner_msg[3], -planner_msg[4], -planner_msg[5], planner_msg[6], -planner_msg[7], -planner_msg[8], 0, 0);
                         len = mavlink_msg_to_send_buffer(buf, &msg);
                         write(uart_fd, buf, len);
                     }
