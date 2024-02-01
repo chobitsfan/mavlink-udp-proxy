@@ -41,17 +41,11 @@ int main(int argc, char *argv[]) {
     struct sockaddr_un ipc_addr, ipc_addr2;
     uint8_t mav_sysid = 0;
     int ipc_fd, ipc_fd2;
-    bool no_hr_imu = true;
-    bool no_att_q = true;
     float att_q_x =0, att_q_y = 0, att_q_z = 0, att_q_w = 0;
     int64_t time_offset_us = 0;
-    uint64_t last_us = 0;
-    int send_goal = 2;
     bool no_local_pos = true;
-    int demo_stage = 0;
     float xacc = 0, yacc = 0, zacc = 0;
     int parse_error = 0, packet_rx_drop_count = 0;
-    float latest_local_z = 0;
     int64_t tc1_sent = 0;
     float vins_apm_alt_diff = 0;
     float latest_vins_alt = 0;
@@ -59,7 +53,7 @@ int main(int argc, char *argv[]) {
     if (argc > 1)
         uart_fd = open(argv[1], O_RDWR| O_NOCTTY);
     else
-        uart_fd = open("/dev/ttyTHS0", O_RDWR | O_NOCTTY);
+        uart_fd = open("/dev/ttyAMA0", O_RDWR | O_NOCTTY);
     if (uart_fd < 0) {
         printf("can not open serial port\n");
         return 1;
@@ -131,8 +125,8 @@ int main(int argc, char *argv[]) {
     ros::NodeHandle ros_nh;
     ROS_INFO("mavlink_udp ready");
 
-    ros::Publisher imu_pub = ros_nh.advertise<sensor_msgs::Imu>("/chobits/imu", 100);
-    ros::Publisher goal_pub = ros_nh.advertise<geometry_msgs::PoseStamped>("/goal", 1);
+    //ros::Publisher imu_pub = ros_nh.advertise<sensor_msgs::Imu>("/chobits/imu", 100);
+    //ros::Publisher goal_pub = ros_nh.advertise<geometry_msgs::PoseStamped>("/goal", 1);
     ros::Publisher odo_pub = ros_nh.advertise<nav_msgs::Odometry>("/chobits/odometry", 10);
 
     memset(&status, 0, sizeof(status));
@@ -181,33 +175,6 @@ int main(int argc, char *argv[]) {
                                 len = mavlink_msg_to_send_buffer(buf, &msg);
                                 write(uart_fd, buf, len);
                             }
-                            if (hb.custom_mode == COPTER_MODE_GUIDED) {
-                                if (demo_stage == 0) {
-                                    send_goal--;
-                                    if (send_goal == 0) {
-                                        printf("set goal\n");
-                                        demo_stage = 1000;
-                                        geometry_msgs::PoseStamped ros_tgt;
-                                        ros_tgt.header.stamp = ros::Time::now();
-                                        ros_tgt.header.frame_id = "world";
-                                        ros_tgt.pose.position.x = 5;
-                                        ros_tgt.pose.position.y = 0;
-                                        ros_tgt.pose.position.z = -latest_local_z + vins_apm_alt_diff;
-                                        goal_pub.publish(ros_tgt);
-                                    }
-                                }
-                            } else if (hb.custom_mode == COPTER_MODE_STABILIZE) {
-                                demo_stage = 0;
-                                send_goal = 2;
-                                /*if (hb.base_mode & 128) {
-                                    diff_local_vis_n = local_n - vis_n;
-                                    diff_local_vis_e = local_e - vis_e;
-                                    diff_local_vis_d = local_d - vis_d;
-                                    printf("diff_local_vis %.2f %.2f %.2f\n", diff_local_vis_n, diff_local_vis_e, diff_local_vis_d);
-                                }*/
-                            } else if (hb.custom_mode == COPTER_MODE_LOITER) {
-                                demo_stage = 0;
-                            }
                         } else if (msg.msgid == MAVLINK_MSG_ID_TIMESYNC) {
                             mavlink_timesync_t ts;
                             mavlink_msg_timesync_decode(&msg, &ts);
@@ -219,42 +186,6 @@ int main(int argc, char *argv[]) {
                             mavlink_statustext_t txt;
                             mavlink_msg_statustext_decode(&msg, &txt);
                             printf("fc: %s\n", txt.text);
-   	                } else if (msg.msgid == MAVLINK_MSG_ID_HIGHRES_IMU) {
-                            no_hr_imu = false;
-                            mavlink_highres_imu_t hr_imu;
-                            mavlink_msg_highres_imu_decode(&msg, &hr_imu); // time_usec is time since boot
-                            if (time_offset_us > 0 && hr_imu.time_usec > last_us) {
-                                last_us = hr_imu.time_usec;
-                                sensor_msgs::Imu imu_msg;
-                                int64_t ts_us = hr_imu.time_usec + time_offset_us;
-                                int ts_sec = ts_us / 1000000;
-                                imu_msg.header.stamp.sec = ts_sec;
-                                imu_msg.header.stamp.nsec = (ts_us - ts_sec * 1000000) * 1000;
-                                imu_msg.header.frame_id = "world";
-                                imu_msg.linear_acceleration.x = hr_imu.xacc;
-                                imu_msg.linear_acceleration.y = -hr_imu.yacc;
-                                imu_msg.linear_acceleration.z = -hr_imu.zacc;
-                                imu_msg.angular_velocity.x = hr_imu.xgyro;
-                                imu_msg.angular_velocity.y = -hr_imu.ygyro;
-                                imu_msg.angular_velocity.z = -hr_imu.zgyro;
-                                imu_msg.orientation.w = att_q_w;
-                                imu_msg.orientation.x = att_q_x;
-                                imu_msg.orientation.y = -att_q_y;
-                                imu_msg.orientation.z = -att_q_z;
-                                imu_pub.publish(imu_msg);
-                                
-                                xacc = hr_imu.xacc;
-                                yacc = hr_imu.yacc;
-                                zacc = hr_imu.zacc;
-                            }
-                        } else if (msg.msgid == MAVLINK_MSG_ID_ATTITUDE_QUATERNION) {
-                            no_att_q = false;
-                            mavlink_attitude_quaternion_t att_q;
-                            mavlink_msg_attitude_quaternion_decode(&msg, &att_q);
-                            att_q_w = att_q.q1;
-                            att_q_x = att_q.q2;
-                            att_q_y = att_q.q3;
-                            att_q_z = att_q.q4;
                         } else if (msg.msgid == MAVLINK_MSG_ID_LOCAL_POSITION_NED) {
                             no_local_pos = false;
                             mavlink_local_position_ned_t local_pos;
@@ -283,8 +214,6 @@ int main(int argc, char *argv[]) {
                             odo.twist.twist.angular.y = -yacc;
                             odo.twist.twist.angular.z = -zacc;
                             odo_pub.publish(odo);
-                            
-                            latest_local_z = local_pos.z;
                         }
                     }
                 }
@@ -308,6 +237,7 @@ int main(int argc, char *argv[]) {
                     }
                 }
             }
+#if 0
             if (pfds[2].revents & POLLIN) {
                 float planner_msg[9];
                 if (recv(ipc_fd2, &planner_msg, sizeof(planner_msg), 0) > 0) {
@@ -327,11 +257,13 @@ int main(int argc, char *argv[]) {
                     }
                 }
             }
+#endif
         }
     }
 
     close(uart_fd);
     close(ipc_fd);
+    close(ipc_fd2);
 
     printf("bye\n");
 
