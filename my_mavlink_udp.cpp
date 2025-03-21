@@ -44,7 +44,7 @@
 #define HOVER 6
 
 #define CLOSE_DIST_M 0.5f
-#define FAR_DIST_M 1.0f
+#define FAR_DIST_M 0.9f
 
 struct timeval tv_intersect = {0, 0};
 float intersect_cog[2] = {0, 0};
@@ -124,6 +124,7 @@ int main(int argc, char *argv[]) {
     bool dist_sensor_rcved = false;
     bool fc_prx_too_close = false;
     bool slow_down = false;
+    float last_struct_dist = 0;
 
     memset(&last_detected_structs, 0, sizeof(last_detected_structs));
 
@@ -133,7 +134,6 @@ int main(int argc, char *argv[]) {
     auto roll_pub = node->create_publisher<std_msgs::msg::Float32>("roll", 1);
     auto sonar_pub = node->create_publisher<sensor_msgs::msg::Range>("sonar", 1);
     auto vel_pub = node->create_publisher<geometry_msgs::msg::TwistStamped>("tgt_vel", 1);
-    auto tts_pub = node->create_publisher<std_msgs::msg::String>("tts", 1);
     auto intersec_sub = node->create_subscription<geometry_msgs::msg::Point>("templateCOG", 1, intersect_callback);
 
     auto rng = sensor_msgs::msg::Range();
@@ -263,7 +263,9 @@ int main(int argc, char *argv[]) {
                                     float y_diff = cur_vio_y - wp_vio_y;
                                     float z_diff = cur_vio_z - wp_vio_z;
                                     if ((x_diff * x_diff + y_diff * y_diff + z_diff * z_diff) > (MAX_WP_DIST_M * MAX_WP_DIST_M)) {
-                                        printf("exceed MAX_WP_DIST_M, pause\n");
+                                        auto txt = std_msgs::msg::String();
+                                        txt.data = "exceed MAX_WP_DIST_M";
+                                        navi_pub->publish(txt);
                                         mavlink_msg_set_mode_pack(mav_sysid, MY_COMP_ID, &msg, mav_sysid, 1, COPTER_MODE_BRAKE);
                                         len = mavlink_msg_to_send_buffer(buf, &msg);
                                         write(uart_fd, buf, len);
@@ -343,7 +345,6 @@ int main(int argc, char *argv[]) {
                                     auto txt = std_msgs::msg::String();
                                     txt.data = "arrival at waypoint " + std::to_string(mission_idx);
                                     navi_pub->publish(txt);
-                                    tts_pub->publish(txt);
                                     navi_status = PASS_STRUCT_CROSS;
                                     move_status = missions[mission_idx];
                                     // AP_NOTIFY_TONE_LOUD_WP_COMPLETE
@@ -375,61 +376,65 @@ int main(int argc, char *argv[]) {
                             if (slow_down) vel_r = vel_r * 0.6f;
                             if (detected_structs.hori_x == 0) {
                             } else {
+                                // find the intersection point of the hori struct line and the plane y = 0
                                 float t = -detected_structs.hori_y / detected_structs.hori_vy;
                                 float z = detected_structs.hori_z + detected_structs.hori_vz * t;
                                 float x = detected_structs.hori_x + detected_structs.hori_vx * t;
-                                if (z > 0.2f) low_confirm_cnt++; else low_confirm_cnt = 0;
-                                if (z < -0.2f) high_confirm_cnt++; else high_confirm_cnt = 0;
-                                if (x < CLOSE_DIST_M) close_confirm_cnt++; else close_confirm_cnt = 0;
-                                if (x > FAR_DIST_M) far_confirm_cnt++; else far_confirm_cnt = 0;
-                                if (low_confirm_cnt > 1) {
-                                    vel_d = -0.12f;
-                                    auto txt = std_msgs::msg::String();
-                                    txt.data = "too low, move up";
-                                    navi_pub->publish(txt);
-                                } else if (high_confirm_cnt > 1) {
-                                    vel_d = 0.12f;
-                                    auto txt = std_msgs::msg::String();
-                                    txt.data = "too high, move down";
-                                    navi_pub->publish(txt);
-                                }
-                                if (close_confirm_cnt > 1) {
-                                    adj_cnt++;
-                                    vel_f = -0.12f;
-                                    auto txt = std_msgs::msg::String();
-                                    txt.data = "too close, move away";
-                                    navi_pub->publish(txt);
-                                } else if (far_confirm_cnt > 1) {
-                                    adj_cnt++;
-                                    vel_f = 0.12f;
-                                    auto txt = std_msgs::msg::String();
-                                    txt.data = "too far, move close";
-                                    navi_pub->publish(txt);
-                                }
-                                if (adj_cnt > 5) {
-                                    adj_cnt = 0;
-                                    far_confirm_cnt = 0;
-                                    close_confirm_cnt = 0;
-                                }
+                                if (last_struct_dist == 0 || fabsf(x - last_struct_dist) < 0.6f) {
+                                    last_struct_dist = x;
+                                    if (z > 0.2f) low_confirm_cnt++; else low_confirm_cnt = 0;
+                                    if (z < -0.2f) high_confirm_cnt++; else high_confirm_cnt = 0;
+                                    if (x < CLOSE_DIST_M) close_confirm_cnt++; else close_confirm_cnt = 0;
+                                    if (x > FAR_DIST_M) far_confirm_cnt++; else far_confirm_cnt = 0;
+                                    if (low_confirm_cnt > 1) {
+                                        vel_d = -0.12f;
+                                        auto txt = std_msgs::msg::String();
+                                        txt.data = "too low, move up";
+                                        navi_pub->publish(txt);
+                                    } else if (high_confirm_cnt > 1) {
+                                        vel_d = 0.12f;
+                                        auto txt = std_msgs::msg::String();
+                                        txt.data = "too high, move down";
+                                        navi_pub->publish(txt);
+                                    }
+                                    if (close_confirm_cnt > 1) {
+                                        adj_cnt++;
+                                        vel_f = -0.12f;
+                                        auto txt = std_msgs::msg::String();
+                                        txt.data = "too close, move away";
+                                        navi_pub->publish(txt);
+                                    } else if (far_confirm_cnt > 1) {
+                                        adj_cnt++;
+                                        vel_f = 0.12f;
+                                        auto txt = std_msgs::msg::String();
+                                        txt.data = "too far, move close";
+                                        navi_pub->publish(txt);
+                                    }
+                                    if (adj_cnt > 5) {
+                                        adj_cnt = 0;
+                                        far_confirm_cnt = 0;
+                                        close_confirm_cnt = 0;
+                                    }
 
-                                float vx, vy;
-                                if (detected_structs.hori_vy < 0) {
-                                    vx = -detected_structs.hori_vx;
-                                    vy = -detected_structs.hori_vy;
-                                } else {
-                                    vx = detected_structs.hori_vx;
-                                    vy = detected_structs.hori_vy;
-                                }
-                                float angle_y_hori = acosf(vy);
-                                if (angle_y_hori > 0.15f) align_confirm_cnt++; else align_confirm_cnt = 0;
-                                if (align_confirm_cnt > 1 && yaw_adj_cd == 0) {
-                                    yaw_adj_cd = 10;
-                                    align_confirm_cnt = 0;
-                                    //printf("angle_y_hori %f %f\n", angle_y_hori, vx);
-                                    if (vx > 0) tgt_yaw = cur_yaw + angle_y_hori; else tgt_yaw = cur_yaw - angle_y_hori;
-                                    auto txt = std_msgs::msg::String();
-                                    txt.data = "adjust heading " + (vx > 0 ? std::string("cw ") : std::string("ccw ")) + std::to_string(angle_y_hori * 180 / M_PI) + " from " + std::to_string(cur_yaw * 180 / M_PI) + " to " + std::to_string(tgt_yaw * 180 / M_PI);
-                                    navi_pub->publish(txt);
+                                    float vx, vy;
+                                    if (detected_structs.hori_vy < 0) {
+                                        vx = -detected_structs.hori_vx;
+                                        vy = -detected_structs.hori_vy;
+                                    } else {
+                                        vx = detected_structs.hori_vx;
+                                        vy = detected_structs.hori_vy;
+                                    }
+                                    float angle_y_hori = acosf(vy);
+                                    if (angle_y_hori > 0.15f) align_confirm_cnt++; else align_confirm_cnt = 0;
+                                    if (align_confirm_cnt > 1 && yaw_adj_cd == 0) {
+                                        yaw_adj_cd = 10;
+                                        align_confirm_cnt = 0;
+                                        //printf("angle_y_hori %f %f\n", angle_y_hori, vx);
+                                        if (vx > 0) tgt_yaw = cur_yaw + angle_y_hori; else tgt_yaw = cur_yaw - angle_y_hori;
+                                        auto txt = std_msgs::msg::String();
+                                        txt.data = "adjust heading " + (vx > 0 ? std::string("cw ") : std::string("ccw ")) + std::to_string(angle_y_hori * 180 / M_PI) + " from " + std::to_string(cur_yaw * 180 / M_PI) + " to " + std::to_string(tgt_yaw * 180 / M_PI);
+                                        navi_pub->publish(txt);
+                                    }
                                 }
                             }
                             if (yaw_adj_cd > 0) type_mask = 0x9c7;
@@ -482,12 +487,7 @@ int main(int argc, char *argv[]) {
                         }
                     }
                     if (detected_structs.hori_x != 0) {
-                        last_detected_structs.hori_x = detected_structs.hori_x;
-                        last_detected_structs.hori_y = detected_structs.hori_y;
-                        last_detected_structs.hori_z = detected_structs.hori_z;
-                        last_detected_structs.hori_vx = detected_structs.hori_vx;
-                        last_detected_structs.hori_vy = detected_structs.hori_vy;
-                        last_detected_structs.hori_vz = detected_structs.hori_vz;
+                        last_detected_structs = detected_structs;
                     }
                 }
             }
