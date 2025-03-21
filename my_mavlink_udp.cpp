@@ -43,8 +43,8 @@
 #define LAND 5
 #define HOVER 6
 
-#define CLOSE_DIST_M 0.5
-#define FAR_DIST_M 0.9
+#define CLOSE_DIST_M 0.5f
+#define FAR_DIST_M 1.0f
 
 struct timeval tv_intersect = {0, 0};
 float intersect_cog[2] = {0, 0};
@@ -367,41 +367,41 @@ int main(int argc, char *argv[]) {
                             }
                         }
                         if (move_status == MOVE_RIGHT || move_status == MOVE_LEFT) {
-                            float vel_r = 0.2;
+                            float vel_r = 0.2f;
                             float vel_d = 0;
                             float vel_f = 0;
                             uint16_t type_mask = 0xdc7;
-                            if (move_status == MOVE_LEFT) vel_r = -0.2;
+                            if (move_status == MOVE_LEFT) vel_r = -0.2f;
                             if (slow_down) vel_r = vel_r * 0.6f;
                             if (detected_structs.hori_x == 0) {
                             } else {
                                 float t = -detected_structs.hori_y / detected_structs.hori_vy;
                                 float z = detected_structs.hori_z + detected_structs.hori_vz * t;
                                 float x = detected_structs.hori_x + detected_structs.hori_vx * t;
-                                if (z > 0.2) low_confirm_cnt++; else low_confirm_cnt = 0;
-                                if (z < -0.2) high_confirm_cnt++; else high_confirm_cnt = 0;
+                                if (z > 0.2f) low_confirm_cnt++; else low_confirm_cnt = 0;
+                                if (z < -0.2f) high_confirm_cnt++; else high_confirm_cnt = 0;
                                 if (x < CLOSE_DIST_M) close_confirm_cnt++; else close_confirm_cnt = 0;
                                 if (x > FAR_DIST_M) far_confirm_cnt++; else far_confirm_cnt = 0;
-                                if (low_confirm_cnt > 2) {
-                                    vel_d = -0.1;
+                                if (low_confirm_cnt > 1) {
+                                    vel_d = -0.12f;
                                     auto txt = std_msgs::msg::String();
                                     txt.data = "too low, move up";
                                     navi_pub->publish(txt);
-                                } else if (high_confirm_cnt > 2) {
-                                    vel_d = 0.1;
+                                } else if (high_confirm_cnt > 1) {
+                                    vel_d = 0.12f;
                                     auto txt = std_msgs::msg::String();
                                     txt.data = "too high, move down";
                                     navi_pub->publish(txt);
                                 }
-                                if (close_confirm_cnt > 2) {
+                                if (close_confirm_cnt > 1) {
                                     adj_cnt++;
-                                    vel_f = -0.1;
+                                    vel_f = -0.12f;
                                     auto txt = std_msgs::msg::String();
                                     txt.data = "too close, move away";
                                     navi_pub->publish(txt);
-                                } else if (far_confirm_cnt > 2) {
+                                } else if (far_confirm_cnt > 1) {
                                     adj_cnt++;
-                                    vel_f = 0.1;
+                                    vel_f = 0.12f;
                                     auto txt = std_msgs::msg::String();
                                     txt.data = "too far, move close";
                                     navi_pub->publish(txt);
@@ -421,8 +421,8 @@ int main(int argc, char *argv[]) {
                                     vy = detected_structs.hori_vy;
                                 }
                                 float angle_y_hori = acosf(vy);
-                                if (angle_y_hori > 0.15) align_confirm_cnt++; else align_confirm_cnt = 0;
-                                if (align_confirm_cnt > 2 && yaw_adj_cd == 0) {
+                                if (angle_y_hori > 0.15f) align_confirm_cnt++; else align_confirm_cnt = 0;
+                                if (align_confirm_cnt > 1 && yaw_adj_cd == 0) {
                                     yaw_adj_cd = 10;
                                     align_confirm_cnt = 0;
                                     //printf("angle_y_hori %f %f\n", angle_y_hori, vx);
@@ -434,13 +434,13 @@ int main(int argc, char *argv[]) {
                             }
                             if (yaw_adj_cd > 0) type_mask = 0x9c7;
                             if (fc_prx_too_close) {
-                                vel_f = -0.1;
+                                vel_f = -0.15f;
                                 auto txt = std_msgs::msg::String();
                                 txt.data = "sonar: too close, move away";
                                 navi_pub->publish(txt);
                             }
                             gettimeofday(&tv, NULL);
-                            mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, mav_sysid, 1, MAV_FRAME_BODY_OFFSET_NED, type_mask, 0, 0, 0, vel_f, vel_r, vel_d, 0, 0, 0, tgt_yaw, 0);
+                            mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+(uint32_t)(tv.tv_usec*0.001), mav_sysid, 1, MAV_FRAME_BODY_OFFSET_NED, type_mask, 0, 0, 0, vel_f, vel_r, vel_d, 0, 0, 0, tgt_yaw, 0);
                             len = mavlink_msg_to_send_buffer(buf, &msg);
                             write(uart_fd, buf, len);
 
@@ -454,17 +454,17 @@ int main(int argc, char *argv[]) {
                         } else if (move_status == MOVE_UP || move_status == MOVE_DOWN) {
                             float vel_f = 0;
                             float vel_r = 0;
-                            float vel_d = 0.2;
-                            if (move_status == MOVE_UP) vel_d = -0.2;
+                            float vel_d = 0.2f;
+                            if (move_status == MOVE_UP) vel_d = -0.2f;
                             if (slow_down) vel_d = vel_d * 0.6f;
                             if (fc_prx_too_close) {
-                                vel_f = -0.1;
+                                vel_f = -0.15f;
                                 auto txt = std_msgs::msg::String();
                                 txt.data = "sonar: too close, move away";
                                 navi_pub->publish(txt);
                             }
                             gettimeofday(&tv, NULL);
-                            mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+tv.tv_usec*0.001, mav_sysid, 1, MAV_FRAME_BODY_OFFSET_NED, 0xdc7, 0, 0, 0, vel_f, vel_r, vel_d, 0, 0, 0, 0, 0);
+                            mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+(uint32_t)(tv.tv_usec*0.001), mav_sysid, 1, MAV_FRAME_BODY_OFFSET_NED, 0xdc7, 0, 0, 0, vel_f, vel_r, vel_d, 0, 0, 0, 0, 0);
                             len = mavlink_msg_to_send_buffer(buf, &msg);
                             write(uart_fd, buf, len);
 
