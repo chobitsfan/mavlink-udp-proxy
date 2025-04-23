@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.8)
 project(mavlink_udp)
 
 set(CMAKE_BUILD_TYPE "Release")
-set(CMAKE_CXX_FLAGS_RELEASE "-O1 -Wall -Wno-address-of-packed-member -g0")
+set(CMAKE_CXX_FLAGS_RELEASE "-O2 -Wall -Wno-address-of-packed-member")
 
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
