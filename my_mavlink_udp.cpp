@@ -74,6 +74,7 @@ class MavRosNode : public rclcpp::Node {
             odom_sub = this->create_subscription<nav_msgs::msg::Odometry>("odometry", rclcpp::QoS(1).best_effort().durability_volatile(), [this](const nav_msgs::msg::Odometry::SharedPtr msg) { odom_callback(msg); });
             intersec_sub = this->create_subscription<geometry_msgs::msg::Point>("templateCOG", 1, [this](const geometry_msgs::msg::Point::SharedPtr msg) { intersect_callback(msg); });
             hori_line_sub = this->create_subscription<geometry_msgs::msg::Polygon>("hori_line", 1, [this](const geometry_msgs::msg::Polygon::SharedPtr msg) { hori_line_callback(msg); });
+            vert_line_sub = this->create_subscription<geometry_msgs::msg::Polygon>("vert_line_polygon", 1, [this](const geometry_msgs::msg::Polygon::SharedPtr msg) { vert_line_callback(msg); });
             uart_timer = this->create_wall_timer(10ms, [this](){ timer_callback(); });
         }
 
@@ -108,6 +109,11 @@ class MavRosNode : public rclcpp::Node {
             intersect_cog[0] = msg->x;
             intersect_cog[1] = msg->y;
             gettimeofday(&tv_intersect, NULL);
+        }
+
+        void vert_line_callback(const geometry_msgs::msg::Polygon::SharedPtr poly_msg) {
+            vert_line_p1u =  poly_msg->points[0].x;
+            gettimeofday(&tv_vert_line, NULL);
         }
 
         void hori_line_callback(const geometry_msgs::msg::Polygon::SharedPtr poly_msg) {
@@ -247,6 +253,14 @@ class MavRosNode : public rclcpp::Node {
                     float vel_d = 0.2f;
                     if (move_status == MOVE_UP) vel_d = -0.2f;
                     if (slow_down) vel_d = vel_d * 0.6f;
+                    gettimeofday(&tv, NULL);
+                    if (((tv.tv_sec - tv_vert_line.tv_sec) * 1'000'000 + tv.tv_usec - tv_vert_line.tv_usec) < 500'000) {
+                        if (vert_line_p1u < 0.3) {
+                            vel_r = -0.12f;
+                        } else if (vert_line_p1u > 0.7) {
+                            vel_r = 0.12f;
+                        }
+                    }
                     if (fc_prx_too_close) {
                         vel_f = -0.15f;
                         auto txt = std_msgs::msg::String();
@@ -417,12 +431,15 @@ class MavRosNode : public rclcpp::Node {
         bool fc_prx_too_close = false;
         bool slow_down = false;
         float last_struct_dist = 0;
+        struct timeval tv_vert_line = {0, 0};
+        float vert_line_p1u = 0;
         rclcpp::Publisher<std_msgs::msg::String>::SharedPtr navi_pub;
         rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr roll_pub;
         rclcpp::Publisher<sensor_msgs::msg::Range>::SharedPtr sonar_pub;
         rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr vel_pub;
         rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr intersec_sub;
         rclcpp::Subscription<geometry_msgs::msg::Polygon>::SharedPtr hori_line_sub;
+        rclcpp::Subscription<geometry_msgs::msg::Polygon>::SharedPtr vert_line_sub;
         rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub;
         rclcpp::TimerBase::SharedPtr uart_timer;
 };
