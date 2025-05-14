@@ -67,7 +67,6 @@ float angle_between_vectors(float v1x, float v1y, float v1z, float v2x, float v2
 class MavRosNode : public rclcpp::Node {
     public:
         MavRosNode(int uart_fd) : Node("mavlink_ros"), uart_fd_(uart_fd) {
-            navi_pub = this->create_publisher<std_msgs::msg::String>("navi", 1);
             roll_pub = this->create_publisher<std_msgs::msg::Float32>("roll", 1);
             sonar_pub = this->create_publisher<sensor_msgs::msg::Range>("sonar", 1);
             vel_pub = this->create_publisher<geometry_msgs::msg::TwistStamped>("tgt_vel", 1);
@@ -112,7 +111,7 @@ class MavRosNode : public rclcpp::Node {
         }
 
         void vert_line_callback(const geometry_msgs::msg::Polygon::SharedPtr poly_msg) {
-            vert_line_p1u =  poly_msg->points[0].x;
+            vert_line_p1u = poly_msg->points[0].x;
             gettimeofday(&tv_vert_line, NULL);
         }
 
@@ -130,30 +129,24 @@ class MavRosNode : public rclcpp::Node {
                     if (((tv.tv_sec - tv_intersect.tv_sec) * 1'000'000 + tv.tv_usec - tv_intersect.tv_usec) < 500'000) {
                         if ((move_status == MOVE_LEFT && intersect_cog[0] < 0.2) || (move_status == MOVE_RIGHT && intersect_cog[0] > 0.8) || (move_status == MOVE_UP && intersect_cog[1] < 0.2)) {
                             slow_down = true;
-                            auto txt = std_msgs::msg::String();
-                            txt.data = "intersection detected on edge, slowing down";
-                            navi_pub->publish(txt);
+                            RCLCPP_INFO(this->get_logger(), "intersection detected on edge, slowing down");
                         } else {
                             slow_down = false;
-                            auto txt = std_msgs::msg::String();
-                            txt.data = "arrival at waypoint " + std::to_string(mission_idx);
-                            navi_pub->publish(txt);
+                            RCLCPP_INFO(this->get_logger(), "arrival at waypoint %d", mission_idx);
                             navi_status = PASS_STRUCT_CROSS;
                             move_status = missions[mission_idx];
+                            last_wp_pos = cur_pos;
                             // AP_NOTIFY_TONE_LOUD_WP_COMPLETE
                             // to noisy, cannot hear it
                             /*mavlink_msg_play_tune_pack(mav_sysid, MY_COMP_ID, &msg, mav_sysid, 1, "MFT200L8G>C3", "");
                             len = mavlink_msg_to_send_buffer(buf, &msg);
                             write(uart_fd, buf, len);*/
-                            last_wp_pos = cur_pos;
                         }
                     }
                 } else if (navi_status == PASS_STRUCT_CROSS) {
                     gettimeofday(&tv, NULL);
                     if (((tv.tv_sec - tv_intersect.tv_sec) * 1'000'000 + tv.tv_usec - tv_intersect.tv_usec) > 1'500'000) {
-                        auto txt = std_msgs::msg::String();
-                        txt.data = "intersection passed";
-                        navi_pub->publish(txt);
+                        RCLCPP_INFO(this->get_logger(), "intersection passed");
                         navi_status = SEARCH_STRUCT_CROSS;
                         if (mission_idx >= 0) mission_idx++;
                     }
@@ -179,27 +172,19 @@ class MavRosNode : public rclcpp::Node {
                             if (x > FAR_DIST_M) far_confirm_cnt++; else far_confirm_cnt = 0;
                             if (low_confirm_cnt > 1) {
                                 vel_d = -0.12f;
-                                auto txt = std_msgs::msg::String();
-                                txt.data = "too low, move up";
-                                navi_pub->publish(txt);
+                                RCLCPP_INFO(this->get_logger(), "too low, move up");
                             } else if (high_confirm_cnt > 1) {
                                 vel_d = 0.12f;
-                                auto txt = std_msgs::msg::String();
-                                txt.data = "too high, move down";
-                                navi_pub->publish(txt);
+                                RCLCPP_INFO(this->get_logger(), "too high, move down");
                             }
                             if (close_confirm_cnt > 1) {
                                 adj_cnt++;
                                 vel_f = -0.12f;
-                                auto txt = std_msgs::msg::String();
-                                txt.data = "too close, move away";
-                                navi_pub->publish(txt);
+                                RCLCPP_INFO(this->get_logger(), "too close, move away");
                             } else if (far_confirm_cnt > 1) {
                                 adj_cnt++;
                                 vel_f = 0.12f;
-                                auto txt = std_msgs::msg::String();
-                                txt.data = "too far, move close";
-                                navi_pub->publish(txt);
+                                RCLCPP_INFO(this->get_logger(), "too close, move away");
                             }
                             if (adj_cnt > 5) {
                                 adj_cnt = 0;
@@ -222,18 +207,14 @@ class MavRosNode : public rclcpp::Node {
                                 align_confirm_cnt = 0;
                                 //printf("angle_y_hori %f %f\n", angle_y_hori, vx);
                                 if (vx > 0) tgt_yaw = cur_yaw + angle_y_hori; else tgt_yaw = cur_yaw - angle_y_hori;
-                                auto txt = std_msgs::msg::String();
-                                txt.data = "adjust heading " + (vx > 0 ? std::string("cw ") : std::string("ccw ")) + std::to_string(angle_y_hori * 180 / M_PI) + " from " + std::to_string(cur_yaw * 180 / M_PI) + " to " + std::to_string(tgt_yaw * 180 / M_PI);
-                                navi_pub->publish(txt);
+                                RCLCPP_INFO_STREAM(this->get_logger(), "adjust heading " << (vx > 0 ? std::string("cw ") : std::string("ccw ")) <<  angle_y_hori * 180 / M_PI << " from " << cur_yaw * 180 / M_PI << " to " << tgt_yaw * 180 / M_PI);
                             }
                         }
                     }
                     if (yaw_adj_cd > 0) type_mask = 0x9c7;
                     if (fc_prx_too_close) {
                         vel_f = -0.15f;
-                        auto txt = std_msgs::msg::String();
-                        txt.data = "sonar: too close, move away";
-                        navi_pub->publish(txt);
+                        RCLCPP_INFO(this->get_logger(), "sonar: too close, move away");
                     }
                     gettimeofday(&tv, NULL);
                     mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+(uint32_t)(tv.tv_usec*0.001), mav_sysid, 1, MAV_FRAME_BODY_OFFSET_NED, type_mask, 0, 0, 0, vel_f, vel_r, vel_d, 0, 0, 0, tgt_yaw, 0);
@@ -263,9 +244,7 @@ class MavRosNode : public rclcpp::Node {
                     }
                     if (fc_prx_too_close) {
                         vel_f = -0.15f;
-                        auto txt = std_msgs::msg::String();
-                        txt.data = "sonar: too close, move away";
-                        navi_pub->publish(txt);
+                        RCLCPP_INFO(this->get_logger(), "sonar: too close, move away");
                     }
                     gettimeofday(&tv, NULL);
                     mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+(uint32_t)(tv.tv_usec*0.001), mav_sysid, 1, MAV_FRAME_BODY_OFFSET_NED, 0xdc7, 0, 0, 0, vel_f, vel_r, vel_d, 0, 0, 0, 0, 0);
@@ -324,9 +303,7 @@ class MavRosNode : public rclcpp::Node {
                         }
                         if (hb.custom_mode == COPTER_MODE_GUIDED) {
                             if (mission_idx == -1) {
-                                auto txt = std_msgs::msg::String();
-                                txt.data = "mission start";
-                                navi_pub->publish(txt);
+                                RCLCPP_INFO(this->get_logger(), "mission start");
                                 mission_idx = 0;
                                 navi_status = SEARCH_STRUCT_CROSS;
                                 move_status = HOVER;
@@ -335,9 +312,7 @@ class MavRosNode : public rclcpp::Node {
                                 float y_diff = cur_pos.y - last_wp_pos.y;
                                 float z_diff = cur_pos.z - last_wp_pos.z;
                                 if ((x_diff * x_diff + y_diff * y_diff + z_diff * z_diff) > (MAX_WP_DIST_M * MAX_WP_DIST_M)) {
-                                    auto txt = std_msgs::msg::String();
-                                    txt.data = "exceed MAX_WP_DIST_M";
-                                    navi_pub->publish(txt);
+                                    RCLCPP_INFO(this->get_logger(), "exceed MAX_WP_DIST_M");
                                     mavlink_msg_set_mode_pack(mav_sysid, MY_COMP_ID, &msg, mav_sysid, 1, COPTER_MODE_BRAKE);
                                     len = mavlink_msg_to_send_buffer(buf, &msg);
                                     write(uart_fd_, buf, len);
@@ -433,7 +408,6 @@ class MavRosNode : public rclcpp::Node {
         float last_struct_dist = 0;
         struct timeval tv_vert_line = {0, 0};
         float vert_line_p1u = 0;
-        rclcpp::Publisher<std_msgs::msg::String>::SharedPtr navi_pub;
         rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr roll_pub;
         rclcpp::Publisher<sensor_msgs::msg::Range>::SharedPtr sonar_pub;
         rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr vel_pub;
