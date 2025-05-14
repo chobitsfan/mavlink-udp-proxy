@@ -38,6 +38,7 @@
 
 #define SEARCH_STRUCT_CROSS 1
 #define PASS_STRUCT_CROSS 2
+#define PASS_HORI_VERT 3
 #define MOVE_UP 1
 #define MOVE_RIGHT 2
 #define MOVE_DOWN 3
@@ -142,10 +143,21 @@ class MavRosNode : public rclcpp::Node {
                             len = mavlink_msg_to_send_buffer(buf, &msg);
                             write(uart_fd, buf, len);*/
                         }
+                    } else if (((tv.tv_sec - tv_vert_line.tv_sec) * 1'000'000 + tv.tv_usec - tv_vert_line.tv_usec) < 500'000 && hori_p.x != 0) {
+                        RCLCPP_INFO(this->get_logger(), "hori & vert struct detected, arrival at waypoint %d", mission_idx);
+                        navi_status = PASS_HORI_VERT;
+                        move_status = missions[mission_idx];
+                        last_wp_pos = cur_pos;
                     }
                 } else if (navi_status == PASS_STRUCT_CROSS) {
                     gettimeofday(&tv, NULL);
                     if (((tv.tv_sec - tv_intersect.tv_sec) * 1'000'000 + tv.tv_usec - tv_intersect.tv_usec) > 1'500'000) {
+                        RCLCPP_INFO(this->get_logger(), "intersection passed");
+                        navi_status = SEARCH_STRUCT_CROSS;
+                        if (mission_idx >= 0) mission_idx++;
+                    }
+                } else if (navi_status == PASS_HORI_VERT) {
+                    if ((cur_pos.y - last_wp_pos.y) * (cur_pos.y - last_wp_pos.y) + (cur_pos.z - last_wp_pos.z) * (cur_pos.z - last_wp_pos.z) > 1) {
                         RCLCPP_INFO(this->get_logger(), "intersection passed");
                         navi_status = SEARCH_STRUCT_CROSS;
                         if (mission_idx >= 0) mission_idx++;
