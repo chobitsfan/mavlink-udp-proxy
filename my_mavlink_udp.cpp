@@ -67,9 +67,9 @@ float angle_between_vectors(float v1x, float v1y, float v1z, float v2x, float v2
 class MavRosNode : public rclcpp::Node {
     public:
         MavRosNode(int uart_fd) : Node("mavlink_ros"), uart_fd_(uart_fd) {
-            roll_pub = this->create_publisher<std_msgs::msg::Float32>("roll", 1);
-            sonar_pub = this->create_publisher<sensor_msgs::msg::Range>("sonar", 1);
-            vel_pub = this->create_publisher<geometry_msgs::msg::TwistStamped>("tgt_vel", 1);
+            roll_pub = this->create_publisher<std_msgs::msg::Float32>("roll", rclcpp::QoS(1).best_effort().durability_volatile());
+            sonar_pub = this->create_publisher<sensor_msgs::msg::Range>("sonar", rclcpp::QoS(1).best_effort().durability_volatile());
+            vel_pub = this->create_publisher<geometry_msgs::msg::TwistStamped>("tgt_vel", rclcpp::QoS(1).best_effort().durability_volatile());
             odom_sub = this->create_subscription<nav_msgs::msg::Odometry>("odometry", rclcpp::QoS(1).best_effort().durability_volatile(), [this](const nav_msgs::msg::Odometry::SharedPtr msg) { odom_callback(msg); });
             intersec_sub = this->create_subscription<geometry_msgs::msg::Point>("templateCOG", 1, [this](const geometry_msgs::msg::Point::SharedPtr msg) { intersect_callback(msg); });
             hori_line_sub = this->create_subscription<geometry_msgs::msg::Polygon>("hori_line", 1, [this](const geometry_msgs::msg::Polygon::SharedPtr msg) { hori_line_callback(msg); });
