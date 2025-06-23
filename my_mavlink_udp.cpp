@@ -77,6 +77,18 @@ class MavRosNode : public rclcpp::Node {
             uart_timer = this->create_wall_timer(10ms, [this](){ timer_callback(); });
         }
 
+        void read_mission(const char* csv_path) {
+            FILE *file = fopen(csv_path, "r");
+            if (file) {
+                int act, type;
+                while (fscanf(file, "%d ,%d", &act, &type) == 2) {
+                    missions.push_back({act, type});
+                }
+                printf("mission loaded, total %ld\n", missions.size());
+                fclose(file);
+            } else printf("can not open mission file: %s\n", csv_path);
+        }
+
     private:
         void odom_callback(const nav_msgs::msg::Odometry::SharedPtr odom_msg) {
             struct timeval tv;
@@ -123,7 +135,7 @@ class MavRosNode : public rclcpp::Node {
             auto hori_p = poly_msg->points[0];
             auto hori_v = poly_msg->points[1];
             if (yaw_adj_cd > 0) yaw_adj_cd--;
-            if (mission_idx >= 0 && (unsigned int)mission_idx < (sizeof(missions) / sizeof(missions[0]))) {
+            if (mission_idx >= 0 && mission_idx < (int)missions.size()) {
                 if (navi_status == SEARCH_STRUCT_CROSS) {
                     gettimeofday(&tv, NULL);
                     if (((tv.tv_sec - tv_intersect.tv_sec) * 1'000'000 + tv.tv_usec - tv_intersect.tv_usec) < 500'000) {
@@ -134,7 +146,7 @@ class MavRosNode : public rclcpp::Node {
                             slow_down = false;
                             RCLCPP_INFO(this->get_logger(), "arrival at waypoint %d", mission_idx);
                             navi_status = PASS_STRUCT_CROSS;
-                            move_status = missions[mission_idx];
+                            move_status = missions[mission_idx][0];
                             last_wp_pos = cur_pos;
                             // AP_NOTIFY_TONE_LOUD_WP_COMPLETE
                             // to noisy, cannot hear it
@@ -370,25 +382,7 @@ class MavRosNode : public rclcpp::Node {
         float intersect_cog[2] = {0, 0};
         bool att_rcved = false;
         float cur_yaw = 0;
-        int missions[17] = {
-            MOVE_UP,
-            MOVE_LEFT,
-            MOVE_DOWN,
-            MOVE_LEFT,
-            MOVE_UP,
-            MOVE_RIGHT,
-            MOVE_DOWN,
-            MOVE_RIGHT,
-            MOVE_UP,
-            MOVE_LEFT,
-            MOVE_DOWN,
-            MOVE_LEFT,
-            MOVE_UP,
-            MOVE_RIGHT,
-            MOVE_DOWN,
-            MOVE_RIGHT,
-            LAND,
-        };
+        std::vector<std::array<int, 2>> missions;
         int mission_idx = -1;
         geometry_msgs::msg::Point cur_pos;
         geometry_msgs::msg::Point last_wp_pos;
@@ -465,6 +459,10 @@ int main(int argc, char *argv[]) {
 
     rclcpp::init(argc, argv);
     auto node = std::make_shared<MavRosNode>(uart_fd);
+    if (argc > 2)
+        node->read_mission(argv[2]);
+    else
+        node->read_mission("missions.csv");
     rclcpp::spin(node);
     rclcpp::shutdown();
 
