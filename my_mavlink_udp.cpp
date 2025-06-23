@@ -8,18 +8,13 @@
 #include <signal.h>
 #include <termios.h> // Contains POSIX terminal control definitions
 #include <errno.h> // Error integer and strerror() function
-#include <sys/socket.h>
-#include <sys/un.h>
-#include <arpa/inet.h>
-#include <netinet/in.h>
 #include <math.h>
-#include <sys/wait.h>
-#include <poll.h>
 #include <time.h>
 #include "mavlink/ardupilotmega/mavlink.h"
 #include "rclcpp/rclcpp.hpp"
 #include "std_msgs/msg/string.hpp"
 #include "std_msgs/msg/float32.hpp"
+#include "std_msgs/msg/int32.hpp"
 #include "visualization_msgs/msg/marker.hpp"
 #include "geometry_msgs/msg/point.hpp"
 #include "sensor_msgs/msg/range.hpp"
@@ -70,6 +65,7 @@ class MavRosNode : public rclcpp::Node {
             roll_pub = this->create_publisher<std_msgs::msg::Float32>("roll", rclcpp::QoS(1).best_effort().durability_volatile());
             sonar_pub = this->create_publisher<sensor_msgs::msg::Range>("sonar", rclcpp::QoS(1).best_effort().durability_volatile());
             vel_pub = this->create_publisher<geometry_msgs::msg::TwistStamped>("tgt_vel", rclcpp::QoS(1).best_effort().durability_volatile());
+            intersect_type_pub = this->create_publisher<std_msgs::msg::Int32>("intersect_type", 1);
             odom_sub = this->create_subscription<nav_msgs::msg::Odometry>("odometry", rclcpp::QoS(1).best_effort().durability_volatile(), [this](const nav_msgs::msg::Odometry::SharedPtr msg) { odom_callback(msg); });
             intersec_sub = this->create_subscription<geometry_msgs::msg::Point>("templateCOG", 1, [this](const geometry_msgs::msg::Point::SharedPtr msg) { intersect_callback(msg); });
             hori_line_sub = this->create_subscription<geometry_msgs::msg::Polygon>("hori_line", 1, [this](const geometry_msgs::msg::Polygon::SharedPtr msg) { hori_line_callback(msg); });
@@ -160,7 +156,12 @@ class MavRosNode : public rclcpp::Node {
                     if (((tv.tv_sec - tv_intersect.tv_sec) * 1'000'000 + tv.tv_usec - tv_intersect.tv_usec) > 1'500'000) {
                         RCLCPP_INFO(this->get_logger(), "intersection passed");
                         navi_status = SEARCH_STRUCT_CROSS;
-                        if (mission_idx >= 0) mission_idx++;
+                        mission_idx++;
+                        if (mission_idx < (int)missions.size()) {
+                            auto m = std_msgs::msg::Int32();
+                            m.data = missions[mission_idx][1];
+                            intersect_type_pub->publish(m);
+                        }
                     }
                 }
                 if (move_status == MOVE_RIGHT || move_status == MOVE_LEFT) {
@@ -319,6 +320,9 @@ class MavRosNode : public rclcpp::Node {
                                 mission_idx = 0;
                                 navi_status = SEARCH_STRUCT_CROSS;
                                 move_status = HOVER;
+                                auto m = std_msgs::msg::Int32();
+                                m.data = missions[0][1];
+                                intersect_type_pub->publish(m);
                             } else {
                                 float x_diff = cur_pos.x - last_wp_pos.x;
                                 float y_diff = cur_pos.y - last_wp_pos.y;
@@ -405,6 +409,7 @@ class MavRosNode : public rclcpp::Node {
         rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr roll_pub;
         rclcpp::Publisher<sensor_msgs::msg::Range>::SharedPtr sonar_pub;
         rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr vel_pub;
+        rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr intersect_type_pub;
         rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr intersec_sub;
         rclcpp::Subscription<geometry_msgs::msg::Polygon>::SharedPtr hori_line_sub;
         rclcpp::Subscription<geometry_msgs::msg::Polygon>::SharedPtr vert_line_sub;
