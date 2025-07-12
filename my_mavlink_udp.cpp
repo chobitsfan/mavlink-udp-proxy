@@ -43,23 +43,23 @@ class MavRosNode : public rclcpp::Node {
 
     private:
         void odom_callback(const nav_msgs::msg::Odometry::SharedPtr odom_msg) {
-            struct timeval tv;
             mavlink_message_t msg;
             float covar[21] = {0};
             float q[4];
             unsigned int len;
             geometry_msgs::msg::Pose *pose = &odom_msg->pose.pose;
             geometry_msgs::msg::Vector3 *v = &odom_msg->twist.twist.linear;
-            if (mav_sysid != 0) {
+            if (mav_sysid != 0 && time_offset_ns != 0) {
                 q[0] = pose->orientation.w;
                 q[1] = pose->orientation.x;
                 q[2] = -pose->orientation.y;
                 q[3] = -pose->orientation.z;
-                gettimeofday(&tv, NULL);
-                mavlink_msg_att_pos_mocap_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000000+tv.tv_usec, q, pose->position.x, -pose->position.y, -pose->position.z, covar);
+                int64_t odom_fc_us = ((odom_msg->header.stamp.sec * 1000000000L + odom_msg->header.stamp.nanosec) - time_offset_ns) / 1000;
+                //printf("odom_us, odom_fc_us %ld %ld\n", odom_msg->header.stamp.sec * 1000000000L + odom_msg->header.stamp.nanosec, odom_fc_us);
+                mavlink_msg_att_pos_mocap_pack(mav_sysid, MY_COMP_ID, &msg, odom_fc_us, q, pose->position.x, -pose->position.y, -pose->position.z, covar);
                 len = mavlink_msg_to_send_buffer(buf, &msg);
                 write(uart_fd_, buf, len);
-                mavlink_msg_vision_speed_estimate_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000000+tv.tv_usec, v->x, -v->y, -v->z, covar, 0);
+                mavlink_msg_vision_speed_estimate_pack(mav_sysid, MY_COMP_ID, &msg, odom_fc_us, v->x, -v->y, -v->z, covar, 0);
                 len = mavlink_msg_to_send_buffer(buf, &msg);
                 write(uart_fd_, buf, len);
             }
@@ -144,6 +144,13 @@ class MavRosNode : public rclcpp::Node {
                         mavlink_statustext_t txt;
                         mavlink_msg_statustext_decode(&msg, &txt);
                         printf("fc: %s\n", txt.text);
+                    } else if (msg.msgid == MAVLINK_MSG_ID_TIMESYNC) {
+                        struct timespec tp;
+                        clock_gettime(CLOCK_MONOTONIC, &tp);
+                        mavlink_timesync_t sync;
+                        mavlink_msg_timesync_decode(&msg, &sync);
+                        time_offset_ns = (tp.tv_sec * 1000000000 + tp.tv_nsec) - sync.ts1;
+                        printf("time offset: %ld \n", time_offset_ns);
                     }
                 }
             }
@@ -157,6 +164,7 @@ class MavRosNode : public rclcpp::Node {
         rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr avd_dir_sub_;
         rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
         rclcpp::TimerBase::SharedPtr uart_timer_;
+        int64_t time_offset_ns = 0;
 };
 
 int main(int argc, char *argv[]) {
