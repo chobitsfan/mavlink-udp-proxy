@@ -77,7 +77,6 @@ class MavRosNode : public rclcpp::Node {
             static int parse_error = 0;
             static int packet_rx_drop_count = 0;
             static int timesync_counter = 4;
-            struct timeval tv;
             unsigned int len;
             ssize_t avail;
             mavlink_status_t status;
@@ -106,6 +105,7 @@ class MavRosNode : public rclcpp::Node {
                             mav_sysid = msg.sysid;
                             printf("found MAV %d\n", msg.sysid);
 
+                            struct timeval tv;
                             gettimeofday(&tv, NULL);
                             mavlink_msg_system_time_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000000+tv.tv_usec, 0);
                             len = mavlink_msg_to_send_buffer(buf, &msg);
@@ -117,25 +117,15 @@ class MavRosNode : public rclcpp::Node {
                         }
                         if (hb.custom_mode == COPTER_MODE_GUIDED) {
                             if (!in_guided) {
-                                geometry_msgs::msg::PointStamped p;
-                                p.header.frame_id = "body";
-                                p.header.stamp = this->get_clock()->now();
-                                p.point.x = 10;
-                                p.point.y = 0;
-                                p.point.z = 0;
-                                tgt_p_pub_->publish(p);
+                                struct timespec tp;
+                                mavlink_message_t msg;
+                                clock_gettime(CLOCK_MONOTONIC, &tp);
+                                mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tp.tv_sec*1000+tp.tv_nsec/1000000, mav_sysid, 1, MAV_FRAME_BODY_OFFSET_NED, 0xdf8, 40.0f, 0, -2.0f, 0, 0, 0, 0, 0, 0, 0, 0);
+                                len = mavlink_msg_to_send_buffer(buf, &msg);
+                                write(uart_fd_, buf, len);
                             }
                             in_guided = true;
                         } else {
-                            if (in_guided) {
-                                geometry_msgs::msg::PointStamped p;
-                                p.header.frame_id = "body";
-                                p.header.stamp = this->get_clock()->now();
-                                p.point.x = 0;
-                                p.point.y = 0;
-                                p.point.z = 0;
-                                tgt_p_pub_->publish(p);
-                            }
                             in_guided = false;
                         }
                         if (timesync_counter > 3) {
