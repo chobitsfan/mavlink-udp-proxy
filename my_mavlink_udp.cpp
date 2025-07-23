@@ -55,10 +55,6 @@ struct __attribute__((packed)) lines_3d {
     float hori_vz;
 };
 
-float angle_between_vectors(float v1x, float v1y, float v1z, float v2x, float v2y, float v2z) {
-    return acosf((v1x * v2x + v1y * v2y + v1z * v2z) / (sqrtf(v1x * v1x + v1y * v1y + v1z * v1z) * sqrtf(v2x * v2x + v2y * v2y + v2z * v2z)));
-}
-
 class MavRosNode : public rclcpp::Node {
     public:
         MavRosNode(int uart_fd) : Node("mavlink_ros"), uart_fd_(uart_fd) {
@@ -89,7 +85,6 @@ class MavRosNode : public rclcpp::Node {
 
     private:
         void odom_callback(const nav_msgs::msg::Odometry::SharedPtr odom_msg) {
-            struct timeval tv;
             mavlink_message_t msg;
             float covar[21] = {0};
             float q[4];
@@ -98,16 +93,16 @@ class MavRosNode : public rclcpp::Node {
             geometry_msgs::msg::Pose *pose = &odom_msg->pose.pose;
             geometry_msgs::msg::Vector3 *v = &odom_msg->twist.twist.linear;
             cur_pos = pose->position;
-            if (mav_sysid != 0) {
+            if (mav_sysid != 0 && time_offset_ns != 0) {
                 q[0] = pose->orientation.w;
                 q[1] = pose->orientation.x;
                 q[2] = -pose->orientation.y;
                 q[3] = -pose->orientation.z;
-                gettimeofday(&tv, NULL);
-                mavlink_msg_att_pos_mocap_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000000+tv.tv_usec, q, pose->position.x, -pose->position.y, -pose->position.z, covar);
+                int64_t odom_fc_us = ((odom_msg->header.stamp.sec * 1000000000LL + odom_msg->header.stamp.nanosec) - time_offset_ns) / 1000;
+                mavlink_msg_att_pos_mocap_pack(mav_sysid, MY_COMP_ID, &msg, odom_fc_us, q, pose->position.x, -pose->position.y, -pose->position.z, covar);
                 len = mavlink_msg_to_send_buffer(buf, &msg);
                 write(uart_fd_, buf, len);
-                mavlink_msg_vision_speed_estimate_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000000+tv.tv_usec, v->x, -v->y, -v->z, covar, 0);
+                mavlink_msg_vision_speed_estimate_pack(mav_sysid, MY_COMP_ID, &msg, odom_fc_us, v->x, -v->y, -v->z, covar, 0);
                 len = mavlink_msg_to_send_buffer(buf, &msg);
                 write(uart_fd_, buf, len);
             }
@@ -397,6 +392,13 @@ class MavRosNode : public rclcpp::Node {
                         auto m = std_msgs::msg::Float32();
                         m.data = batt.voltages[0] / 1000.0;
                         voltage_pub->publish(m);
+                    } else if (msg.msgid == MAVLINK_MSG_ID_TIMESYNC) {
+                        struct timespec tp;
+                        clock_gettime(CLOCK_MONOTONIC, &tp);
+                        mavlink_timesync_t sync;
+                        mavlink_msg_timesync_decode(&msg, &sync);
+                        time_offset_ns = (tp.tv_sec * 1000000000LL + tp.tv_nsec) - sync.ts1;
+                        printf("time offset: %ld \n", time_offset_ns);
                     }
                 }
             }
@@ -430,6 +432,7 @@ class MavRosNode : public rclcpp::Node {
         float last_struct_dist = 0;
         struct timeval tv_vert_line = {0, 0};
         float vert_line_p1u = 0;
+        int64_t time_offset_ns = 0;
         rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr roll_pub;
         rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr voltage_pub;
         rclcpp::Publisher<sensor_msgs::msg::Range>::SharedPtr sonar_pub;
