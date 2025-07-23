@@ -78,9 +78,9 @@ class MavRosNode : public rclcpp::Node {
         void read_mission(const char* csv_path) {
             FILE *file = fopen(csv_path, "r");
             if (file) {
-                int act, type;
-                while (fscanf(file, "%d ,%d", &act, &type) == 2) {
-                    missions.push_back({act, type});
+                int act, type, dist_cm;
+                while (fscanf(file, "%d ,%d ,%d", &act, &type, &dist_cm) == 3) {
+                    missions.push_back({act, type, dist_cm});
                 }
                 printf("mission loaded, total %ld\n", missions.size());
                 fclose(file);
@@ -152,10 +152,19 @@ class MavRosNode : public rclcpp::Node {
                             len = mavlink_msg_to_send_buffer(buf, &msg);
                             write(uart_fd, buf, len);*/
                         }
+                    } else {
+                        float dx = cur_pos.x - last_wp_pos.x;
+                        float dy = cur_pos.y - last_wp_pos.y;
+                        float dz = cur_pos.z - last_wp_pos.z;
+                        float max_dist = missions[mission_idx][2] * 0.01f;
+                        if ((max_dist > 0) && ((dx * dx + dy * dy + dz * dz) > (max_dist * max_dist))) {
+                            RCLCPP_WARN(this->get_logger(), "exceed wp dist");
+                            move_status = HOVER;
+                        }
                     }
                 } else if (navi_status == PASS_STRUCT_CROSS) {
                     gettimeofday(&tv, NULL);
-                    if (((tv.tv_sec - tv_intersect.tv_sec) * 1'000'000 + tv.tv_usec - tv_intersect.tv_usec) > 1'500'000) {
+                    if (((tv.tv_sec - tv_intersect.tv_sec) * 1'000'000 + tv.tv_usec - tv_intersect.tv_usec) > 2'000'000) {
                         RCLCPP_INFO(this->get_logger(), "intersection passed");
                         navi_status = SEARCH_STRUCT_CROSS;
                         mission_idx++;
@@ -277,6 +286,11 @@ class MavRosNode : public rclcpp::Node {
                     mavlink_msg_set_mode_pack(mav_sysid, MY_COMP_ID, &msg, mav_sysid, 1, COPTER_MODE_LAND);
                     len = mavlink_msg_to_send_buffer(buf, &msg);
                     write(uart_fd_, buf, len);
+                } else if (move_status == HOVER) {
+                    gettimeofday(&tv, NULL);
+                    mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+(uint32_t)(tv.tv_usec*0.001), mav_sysid, 1, MAV_FRAME_BODY_OFFSET_NED, 0xdc7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+                    len = mavlink_msg_to_send_buffer(buf, &msg);
+                    write(uart_fd_, buf, len);
                 }
             }
         }
@@ -325,16 +339,7 @@ class MavRosNode : public rclcpp::Node {
                                 auto m = std_msgs::msg::Int32();
                                 m.data = missions[0][1];
                                 intersect_type_pub->publish(m);
-                            } else {
-                                float x_diff = cur_pos.x - last_wp_pos.x;
-                                float y_diff = cur_pos.y - last_wp_pos.y;
-                                float z_diff = cur_pos.z - last_wp_pos.z;
-                                if ((x_diff * x_diff + y_diff * y_diff + z_diff * z_diff) > (MAX_WP_DIST_M * MAX_WP_DIST_M)) {
-                                    RCLCPP_INFO(this->get_logger(), "exceed MAX_WP_DIST_M");
-                                    mavlink_msg_set_mode_pack(mav_sysid, MY_COMP_ID, &msg, mav_sysid, 1, COPTER_MODE_BRAKE);
-                                    len = mavlink_msg_to_send_buffer(buf, &msg);
-                                    write(uart_fd_, buf, len);
-                                }
+                                last_wp_pos = cur_pos;
                             }
                         } else {
                             mission_idx = -1;
@@ -405,7 +410,7 @@ class MavRosNode : public rclcpp::Node {
         float intersect_cog[2] = {0, 0};
         bool att_rcved = false;
         float cur_yaw = 0;
-        std::vector<std::array<int, 2>> missions;
+        std::vector<std::array<int, 3>> missions;
         int mission_idx = -1;
         geometry_msgs::msg::Point cur_pos;
         geometry_msgs::msg::Point last_wp_pos;
