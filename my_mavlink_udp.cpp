@@ -63,12 +63,12 @@ class MavRosNode : public rclcpp::Node {
             sonar_pub = this->create_publisher<sensor_msgs::msg::Range>("sonar", rclcpp::QoS(1).best_effort().durability_volatile());
             vel_pub = this->create_publisher<geometry_msgs::msg::TwistStamped>("tgt_vel", rclcpp::QoS(1).best_effort().durability_volatile());
             intersect_type_pub = this->create_publisher<std_msgs::msg::Int32>("intersect_type", 1);
-            is_armable_sub = this->create_publisher<std_msgs::msg::Int32>("is_armable", 0);
+            is_armable_sub = this->create_publisher<std_msgs::msg::Int32>("is_armable", 1);
             odom_sub = this->create_subscription<nav_msgs::msg::Odometry>("odometry", rclcpp::QoS(1).best_effort().durability_volatile(), [this](const nav_msgs::msg::Odometry::SharedPtr msg) { odom_callback(msg); });
             intersec_sub = this->create_subscription<geometry_msgs::msg::Point>("templateCOG", 1, [this](const geometry_msgs::msg::Point::SharedPtr msg) { intersect_callback(msg); });
             hori_line_sub = this->create_subscription<geometry_msgs::msg::Polygon>("hori_line", 1, [this](const geometry_msgs::msg::Polygon::SharedPtr msg) { hori_line_callback(msg); });
             vert_line_sub = this->create_subscription<geometry_msgs::msg::Polygon>("vert_line_polygon", 1, [this](const geometry_msgs::msg::Polygon::SharedPtr msg) { vert_line_callback(msg); });
-            uart_timer = this->create_wall_timer(10ms, [this](){ timer_callback(); });
+            uart_timer = this->create_wall_timer(2ms, [this](){ timer_callback(); });
         }
 
         void read_mission(const char* csv_path) {
@@ -291,10 +291,12 @@ class MavRosNode : public rclcpp::Node {
         }
 
         void timer_callback() {
+            static int timesync_counter = 3;
             unsigned char buf[1024];
-            mavlink_status_t status{};
+            mavlink_status_t status = {};
             mavlink_message_t msg;
             struct timeval tv;
+            struct timespec tp;
             int len;
             int avail = read(uart_fd_, buf, sizeof(buf));
             for (int i = 0; i < avail; i++) {
@@ -359,6 +361,13 @@ class MavRosNode : public rclcpp::Node {
                             m.data = 0;
                             is_armable_sub->publish(m);
                         }
+                        if (timesync_counter > 3) {
+                            timesync_counter = 0;
+                            clock_gettime(CLOCK_MONOTONIC, &tp);
+                            mavlink_msg_timesync_pack(mav_sysid, MY_COMP_ID, &msg, 0, (int64_t)tp.tv_sec * 1000000000 + tp.tv_nsec, mav_sysid, 1);
+                            len = mavlink_msg_to_send_buffer(buf, &msg);
+                            write(uart_fd_, buf, len);
+                        } else timesync_counter++;
                     } else if (msg.msgid == MAVLINK_MSG_ID_STATUSTEXT) {
                         mavlink_statustext_t txt;
                         mavlink_msg_statustext_decode(&msg, &txt);
@@ -393,12 +402,12 @@ class MavRosNode : public rclcpp::Node {
                         m.data = batt.voltages[0] / 1000.0;
                         voltage_pub->publish(m);
                     } else if (msg.msgid == MAVLINK_MSG_ID_TIMESYNC) {
-                        struct timespec tp;
-                        clock_gettime(CLOCK_MONOTONIC, &tp);
                         mavlink_timesync_t sync;
                         mavlink_msg_timesync_decode(&msg, &sync);
-                        time_offset_ns = (tp.tv_sec * 1000000000LL + tp.tv_nsec) - sync.ts1;
-                        printf("time offset: %ld \n", time_offset_ns);
+                        if (sync.tc1 > 0) {
+                            time_offset_ns = sync.ts1 - sync.tc1;
+                            printf("time offset: %ld ns\n", time_offset_ns);
+                        }
                     }
                 }
             }
