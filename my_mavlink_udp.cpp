@@ -28,17 +28,13 @@ using namespace std::chrono_literals;
 #define MY_COMP_ID 191
 #define MY_NUM_PFDS 1
 
-float angle_between_vectors(float v1x, float v1y, float v1z, float v2x, float v2y, float v2z) {
-    return acosf((v1x * v2x + v1y * v2y + v1z * v2z) / (sqrtf(v1x * v1x + v1y * v1y + v1z * v1z) * sqrtf(v2x * v2x + v2y * v2y + v2z * v2z)));
-}
-
 class MavRosNode : public rclcpp::Node {
     public:
         MavRosNode(int uart_fd) : Node("mavlink_ros"), uart_fd_(uart_fd) {
             avd_dir_sub_ = this->create_subscription<geometry_msgs::msg::TwistStamped>("avoid_direction", rclcpp::QoS(1).best_effort().durability_volatile(), [this](const geometry_msgs::msg::TwistStamped::SharedPtr twist_msg) { avd_callback(twist_msg); });
             odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>("odometry", rclcpp::QoS(1).best_effort().durability_volatile(), [this](const nav_msgs::msg::Odometry::SharedPtr odom_msg) { odom_callback(odom_msg); });
             tgt_p_pub_ = this->create_publisher<geometry_msgs::msg::PointStamped>("target_point", rclcpp::QoS(1).best_effort().durability_volatile());
-            uart_timer_ = this->create_wall_timer(10ms, [this](){ timer_callback(); });
+            uart_timer_ = this->create_wall_timer(2ms, [this](){ timer_callback(); });
         }
 
     private:
@@ -54,7 +50,7 @@ class MavRosNode : public rclcpp::Node {
                 q[1] = pose->orientation.x;
                 q[2] = -pose->orientation.y;
                 q[3] = -pose->orientation.z;
-                int64_t odom_fc_us = ((odom_msg->header.stamp.sec * 1000000000L + odom_msg->header.stamp.nanosec) - time_offset_ns) / 1000;
+                int64_t odom_fc_us = (((int64_t)(odom_msg->header.stamp.sec) * 1000000000 + odom_msg->header.stamp.nanosec) - time_offset_ns) / 1000;
                 //printf("odom_us, odom_fc_us %ld %ld\n", odom_msg->header.stamp.sec * 1000000000L + odom_msg->header.stamp.nanosec, odom_fc_us);
                 mavlink_msg_att_pos_mocap_pack(mav_sysid, MY_COMP_ID, &msg, odom_fc_us, q, pose->position.x, -pose->position.y, -pose->position.z, covar);
                 len = mavlink_msg_to_send_buffer(buf, &msg);
@@ -80,11 +76,13 @@ class MavRosNode : public rclcpp::Node {
         void timer_callback() {
             static int parse_error = 0;
             static int packet_rx_drop_count = 0;
+            static int timesync_counter = 4;
             struct timeval tv;
             unsigned int len;
             ssize_t avail;
             mavlink_status_t status;
             mavlink_message_t msg;
+            struct timespec tp;
 
             memset(&status, 0, sizeof(status));
 
@@ -140,17 +138,24 @@ class MavRosNode : public rclcpp::Node {
                             }
                             in_guided = false;
                         }
+                        if (timesync_counter > 3) {
+                            timesync_counter = 0;
+                            clock_gettime(CLOCK_MONOTONIC, &tp);
+                            mavlink_msg_timesync_pack(mav_sysid, MY_COMP_ID, &msg, 0, (int64_t)tp.tv_sec * 1000000000 + tp.tv_nsec, mav_sysid, 1);
+                            len = mavlink_msg_to_send_buffer(buf, &msg);
+                            write(uart_fd_, buf, len);
+                        } else timesync_counter++;
                     } else if (msg.msgid == MAVLINK_MSG_ID_STATUSTEXT) {
                         mavlink_statustext_t txt;
                         mavlink_msg_statustext_decode(&msg, &txt);
                         printf("fc: %s\n", txt.text);
                     } else if (msg.msgid == MAVLINK_MSG_ID_TIMESYNC) {
-                        struct timespec tp;
-                        clock_gettime(CLOCK_MONOTONIC, &tp);
                         mavlink_timesync_t sync;
                         mavlink_msg_timesync_decode(&msg, &sync);
-                        time_offset_ns = (tp.tv_sec * 1000000000 + tp.tv_nsec) - sync.ts1;
-                        printf("time offset: %ld \n", time_offset_ns);
+                        if (sync.tc1 > 0) {
+                            time_offset_ns = sync.ts1 - sync.tc1;
+                            printf("time offset: %ld ns\n", time_offset_ns);
+                        }
                     }
                 }
             }
