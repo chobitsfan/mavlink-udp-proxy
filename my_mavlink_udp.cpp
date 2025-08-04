@@ -141,6 +141,7 @@ class MavRosNode : public rclcpp::Node {
                             navi_status = PASS_STRUCT_CROSS;
                             move_status = missions[mission_idx][0];
                             last_wp_pos = cur_pos;
+                            last_struct_dist = 0;
                             // AP_NOTIFY_TONE_LOUD_WP_COMPLETE
                             // to noisy, cannot hear it
                             /*mavlink_msg_play_tune_pack(mav_sysid, MY_COMP_ID, &msg, mav_sysid, 1, "MFT200L8G>C3", "");
@@ -183,7 +184,7 @@ class MavRosNode : public rclcpp::Node {
                         float t = -hori_p.y / hori_v.y;
                         float z = hori_p.z + hori_v.z * t;
                         float x = hori_p.x + hori_v.x * t;
-                        if (last_struct_dist == 0 || fabsf(x - last_struct_dist) < 0.6f) {
+                        if (last_struct_dist == 0 || fabsf(x - last_struct_dist) < 0.6f) { // our dist to struct will not change that large
                             last_struct_dist = x;
                             if (z > 0.2f) low_confirm_cnt++; else low_confirm_cnt = 0;
                             if (z < -0.2f) high_confirm_cnt++; else high_confirm_cnt = 0;
@@ -203,7 +204,7 @@ class MavRosNode : public rclcpp::Node {
                             } else if (far_confirm_cnt > 1) {
                                 adj_cnt++;
                                 vel_f = 0.12f;
-                                RCLCPP_INFO(this->get_logger(), "too close, move away");
+                                RCLCPP_INFO(this->get_logger(), "too far, move closer");
                             }
                             if (adj_cnt > 5) {
                                 adj_cnt = 0;
@@ -282,10 +283,26 @@ class MavRosNode : public rclcpp::Node {
                     len = mavlink_msg_to_send_buffer(buf, &msg);
                     write(uart_fd_, buf, len);
                 } else if (move_status == HOVER) {
-                    gettimeofday(&tv, NULL);
-                    mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+(uint32_t)(tv.tv_usec*0.001), mav_sysid, 1, MAV_FRAME_BODY_OFFSET_NED, 0xdc7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
-                    len = mavlink_msg_to_send_buffer(buf, &msg);
-                    write(uart_fd_, buf, len);
+                    if (hori_p.x == 0) {
+                        gettimeofday(&tv, NULL);
+                        mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+(uint32_t)(tv.tv_usec*0.001), mav_sysid, 1, MAV_FRAME_BODY_OFFSET_NED, 0xdc7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+                        len = mavlink_msg_to_send_buffer(buf, &msg);
+                        write(uart_fd_, buf, len);
+                    } else {
+                        // find the intersection point of the hori struct line and the plane y = 0
+                        float t = -hori_p.y / hori_v.y;
+                        float x = hori_p.x + hori_v.x * t;
+                        float vel_f = 0;
+                        if (x < CLOSE_DIST_M) {
+                            vel_f = -0.12f;
+                        } else if (x > FAR_DIST_M) {
+                            vel_f = 0.12f;
+                        }
+                        gettimeofday(&tv, NULL);
+                        mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+(uint32_t)(tv.tv_usec*0.001), mav_sysid, 1, MAV_FRAME_BODY_OFFSET_NED, 0xdc7, 0, 0, 0, vel_f, 0, 0, 0, 0, 0, 0, 0);
+                        len = mavlink_msg_to_send_buffer(buf, &msg);
+                        write(uart_fd_, buf, len);
+                    }
                 }
             }
         }
