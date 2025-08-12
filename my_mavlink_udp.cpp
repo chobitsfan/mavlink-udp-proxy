@@ -153,7 +153,7 @@ class MavRosNode : public rclcpp::Node {
                         float dy = cur_pos.y - last_wp_pos.y;
                         float dz = cur_pos.z - last_wp_pos.z;
                         float max_dist = missions[mission_idx][2] * 0.01f;
-                        if ((max_dist > 0) && ((dx * dx + dy * dy + dz * dz) > (max_dist * max_dist))) {
+                        if ((move_status != HOVER) && (max_dist > 0) && ((dx * dx + dy * dy + dz * dz) > (max_dist * max_dist))) {
                             RCLCPP_WARN(this->get_logger(), "exceed wp dist");
                             move_status = HOVER;
                         }
@@ -295,8 +295,10 @@ class MavRosNode : public rclcpp::Node {
                         float vel_f = 0;
                         if (x < CLOSE_DIST_M) {
                             vel_f = -0.12f;
+                            RCLCPP_INFO(this->get_logger(), "too close, move away");
                         } else if (x > FAR_DIST_M) {
                             vel_f = 0.12f;
+                            RCLCPP_INFO(this->get_logger(), "too far, move closer");
                         }
                         gettimeofday(&tv, NULL);
                         mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+(uint32_t)(tv.tv_usec*0.001), mav_sysid, 1, MAV_FRAME_BODY_OFFSET_NED, 0xdc7, 0, 0, 0, vel_f, 0, 0, 0, 0, 0, 0, 0);
