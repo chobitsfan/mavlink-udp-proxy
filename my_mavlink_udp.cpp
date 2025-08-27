@@ -291,8 +291,10 @@ class MavRosNode : public rclcpp::Node {
                     } else {
                         // find the intersection point of the hori struct line and the plane y = 0
                         float t = -hori_p.y / hori_v.y;
+                        float z = hori_p.z + hori_v.z * t;
                         float x = hori_p.x + hori_v.x * t;
                         float vel_f = 0;
+                        float vel_d = 0;
                         if (x < CLOSE_DIST_M) {
                             vel_f = -0.12f;
                             RCLCPP_INFO(this->get_logger(), "too close, move away");
@@ -300,8 +302,15 @@ class MavRosNode : public rclcpp::Node {
                             vel_f = 0.12f;
                             RCLCPP_INFO(this->get_logger(), "too far, move closer");
                         }
+                        if (z > 0.2f) {
+                            vel_d = -0.12f;
+                            RCLCPP_INFO(this->get_logger(), "too low, move up");
+                        } else if (z < -0.2f) {
+                            vel_d = 0.12f;
+                            RCLCPP_INFO(this->get_logger(), "too high, move down");
+                        }
                         gettimeofday(&tv, NULL);
-                        mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+(uint32_t)(tv.tv_usec*0.001), mav_sysid, 1, MAV_FRAME_BODY_OFFSET_NED, 0xdc7, 0, 0, 0, vel_f, 0, 0, 0, 0, 0, 0, 0);
+                        mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+(uint32_t)(tv.tv_usec*0.001), mav_sysid, 1, MAV_FRAME_BODY_OFFSET_NED, 0xdc7, 0, 0, 0, vel_f, 0, vel_d, 0, 0, 0, 0, 0);
                         len = mavlink_msg_to_send_buffer(buf, &msg);
                         write(uart_fd_, buf, len);
                     }
