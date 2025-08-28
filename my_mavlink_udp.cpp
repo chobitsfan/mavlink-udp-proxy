@@ -63,7 +63,7 @@ class MavRosNode : public rclcpp::Node {
             sonar_pub = this->create_publisher<sensor_msgs::msg::Range>("sonar", rclcpp::QoS(1).best_effort().durability_volatile());
             vel_pub = this->create_publisher<geometry_msgs::msg::TwistStamped>("tgt_vel", rclcpp::QoS(1).best_effort().durability_volatile());
             intersect_type_pub = this->create_publisher<std_msgs::msg::Int32>("intersect_type", 1);
-            is_armable_sub = this->create_publisher<std_msgs::msg::Int32>("is_armable", 1);
+            is_armable_pub = this->create_publisher<std_msgs::msg::Int32>("is_armable", 1);
             odom_sub = this->create_subscription<nav_msgs::msg::Odometry>("odometry", rclcpp::QoS(1).best_effort().durability_volatile(), [this](const nav_msgs::msg::Odometry::SharedPtr msg) { odom_callback(msg); });
             intersec_sub = this->create_subscription<geometry_msgs::msg::Point>("templateCOG", 1, [this](const geometry_msgs::msg::Point::SharedPtr msg) { intersect_callback(msg); });
             hori_line_sub = this->create_subscription<geometry_msgs::msg::Polygon>("hori_line", 1, [this](const geometry_msgs::msg::Polygon::SharedPtr msg) { hori_line_callback(msg); });
@@ -383,11 +383,11 @@ class MavRosNode : public rclcpp::Node {
                             // if is armable = 1
                             auto m = std_msgs::msg::Int32();
                             m.data = 1;
-                            is_armable_sub->publish(m);
+                            is_armable_pub->publish(m);
                         } else {
                             auto m = std_msgs::msg::Int32();
                             m.data = 0;
-                            is_armable_sub->publish(m);
+                            is_armable_pub->publish(m);
                         }
                         if (timesync_counter > 3) {
                             timesync_counter = 0;
@@ -475,7 +475,7 @@ class MavRosNode : public rclcpp::Node {
         rclcpp::Publisher<sensor_msgs::msg::Range>::SharedPtr sonar_pub;
         rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr vel_pub;
         rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr intersect_type_pub;
-        rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr is_armable_sub;
+        rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr is_armable_pub;
         rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr intersec_sub;
         rclcpp::Subscription<geometry_msgs::msg::Polygon>::SharedPtr hori_line_sub;
         rclcpp::Subscription<geometry_msgs::msg::Polygon>::SharedPtr vert_line_sub;
