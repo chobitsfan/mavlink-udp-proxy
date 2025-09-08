@@ -25,9 +25,6 @@
 // ROS coordinate system, x axis = vehicle front
 
 #define MY_COMP_ID 191
-#define MY_NUM_PFDS 3
-#define SERVER_PATH "/tmp/chobits_server"
-#define SERVER_PATH2 "/tmp/chobits_server2"
 
 #define MAX_WP_DIST_M 8
 
@@ -45,16 +42,6 @@
 
 using namespace std::chrono_literals;
 
-struct __attribute__((packed)) lines_3d {
-//where (vx, vy, vz) is a normalized vector collinear to the line and (x0, y0, z0) is a point on the line.
-    float hori_x;
-    float hori_y;
-    float hori_z;
-    float hori_vx;
-    float hori_vy;
-    float hori_vz;
-};
-
 class MavRosNode : public rclcpp::Node {
     public:
         MavRosNode(int uart_fd) : Node("mavlink_ros"), uart_fd_(uart_fd) {
@@ -62,12 +49,9 @@ class MavRosNode : public rclcpp::Node {
             voltage_pub = this->create_publisher<std_msgs::msg::Float32>("voltage", rclcpp::QoS(1).best_effort().durability_volatile());
             sonar_pub = this->create_publisher<sensor_msgs::msg::Range>("sonar", rclcpp::QoS(1).best_effort().durability_volatile());
             vel_pub = this->create_publisher<geometry_msgs::msg::TwistStamped>("tgt_vel", rclcpp::QoS(1).best_effort().durability_volatile());
-            intersect_type_pub = this->create_publisher<std_msgs::msg::Int32>("intersect_type", 1);
             is_armable_pub = this->create_publisher<std_msgs::msg::Int32>("is_armable", 1);
             odom_sub = this->create_subscription<nav_msgs::msg::Odometry>("odometry", rclcpp::QoS(1).best_effort().durability_volatile(), [this](const nav_msgs::msg::Odometry::SharedPtr msg) { odom_callback(msg); });
-            intersec_sub = this->create_subscription<geometry_msgs::msg::Point>("templateCOG", 1, [this](const geometry_msgs::msg::Point::SharedPtr msg) { intersect_callback(msg); });
-            hori_line_sub = this->create_subscription<geometry_msgs::msg::Polygon>("hori_line", 1, [this](const geometry_msgs::msg::Polygon::SharedPtr msg) { hori_line_callback(msg); });
-            vert_line_sub = this->create_subscription<geometry_msgs::msg::Polygon>("vert_line_polygon", 1, [this](const geometry_msgs::msg::Polygon::SharedPtr msg) { vert_line_callback(msg); });
+            vert_hori_line_sub = this->create_subscription<geometry_msgs::msg::Polygon>("vert_hori_line", 1, [this](const geometry_msgs::msg::Polygon::SharedPtr msg) { vert_hori_line_callback(msg); });
             cmd_sub = this->create_subscription<std_msgs::msg::String>("cmd", rclcpp::QoS(1).best_effort().durability_volatile(), [this](const std_msgs::msg::String::SharedPtr msg) { cmd_callback(msg); });
             uart_timer = this->create_wall_timer(2ms, [this](){ timer_callback(); });
         }
@@ -124,67 +108,33 @@ class MavRosNode : public rclcpp::Node {
             }
         }
 
-        void intersect_callback(const geometry_msgs::msg::Point::SharedPtr msg) {
-            //printf("intersection %f %f\n", msg->x, msg->y);
-            intersect_cog[0] = msg->x;
-            intersect_cog[1] = msg->y;
-            gettimeofday(&tv_intersect, NULL);
-        }
-
-        void vert_line_callback(const geometry_msgs::msg::Polygon::SharedPtr poly_msg) {
-            vert_line_p1u = poly_msg->points[0].x;
-            gettimeofday(&tv_vert_line, NULL);
-        }
-
-        void hori_line_callback(const geometry_msgs::msg::Polygon::SharedPtr poly_msg) {
+        void vert_hori_line_callback(const geometry_msgs::msg::Polygon::SharedPtr poly_msg) {
             unsigned char buf[256];
             mavlink_message_t msg;
             struct timeval tv;
             int len;
-            auto hori_p = poly_msg->points[0];
-            auto hori_v = poly_msg->points[1];
+            auto vert_p = poly_msg->points[0];
+            auto vert_v = poly_msg->points[1];
+            auto hori_p = poly_msg->points[2];
+            auto hori_v = poly_msg->points[3];
             if (yaw_adj_cd > 0) yaw_adj_cd--;
             if (mission_idx >= 0 && mission_idx < (int)missions.size()) {
                 if (navi_status == SEARCH_STRUCT_CROSS) {
-                    gettimeofday(&tv, NULL);
-                    if (((tv.tv_sec - tv_intersect.tv_sec) * 1'000'000 + tv.tv_usec - tv_intersect.tv_usec) < 500'000) {
-                        if ((move_status == MOVE_LEFT && intersect_cog[0] < 0.2) || (move_status == MOVE_RIGHT && intersect_cog[0] > 0.8) || (move_status == MOVE_UP && intersect_cog[1] < 0.2)) {
-                            slow_down = true;
-                            RCLCPP_INFO(this->get_logger(), "intersection detected on edge, slowing down");
-                        } else {
-                            slow_down = false;
-                            RCLCPP_INFO(this->get_logger(), "arrival at waypoint %d", mission_idx);
-                            navi_status = PASS_STRUCT_CROSS;
-                            move_status = missions[mission_idx][0];
-                            last_wp_pos = cur_pos;
-                            last_struct_dist = 0;
-                            // AP_NOTIFY_TONE_LOUD_WP_COMPLETE
-                            // to noisy, cannot hear it
-                            /*mavlink_msg_play_tune_pack(mav_sysid, MY_COMP_ID, &msg, mav_sysid, 1, "MFT200L8G>C3", "");
-                            len = mavlink_msg_to_send_buffer(buf, &msg);
-                            write(uart_fd, buf, len);*/
-                        }
-                    } else {
-                        float dx = cur_pos.x - last_wp_pos.x;
-                        float dy = cur_pos.y - last_wp_pos.y;
-                        float dz = cur_pos.z - last_wp_pos.z;
-                        float max_dist = missions[mission_idx][2] * 0.01f;
-                        if ((move_status != HOVER) && (max_dist > 0) && ((dx * dx + dy * dy + dz * dz) > (max_dist * max_dist))) {
-                            RCLCPP_WARN(this->get_logger(), "exceed wp dist");
-                            move_status = HOVER;
-                        }
+                    if (vert_p.x != 0 && hori_p.x != 0) intersect_confirm_cnt++;
+                    if (intersect_confirm_cnt > 2) {
+                        intersect_confirm_cnt = 0;
+                        RCLCPP_INFO(this->get_logger(), "arrival at waypoint %d", mission_idx);
+                        navi_status = PASS_STRUCT_CROSS;
+                        move_status = missions[mission_idx][0];
+                        last_wp_pos = cur_pos;
                     }
                 } else if (navi_status == PASS_STRUCT_CROSS) {
-                    gettimeofday(&tv, NULL);
-                    if (((tv.tv_sec - tv_intersect.tv_sec) * 1'000'000 + tv.tv_usec - tv_intersect.tv_usec) > 2'000'000) {
+                    float dy = cur_pos.y - last_wp_pos.y;
+                    float dz = cur_pos.z - last_wp_pos.z;
+                    if (dy * dy + dz * dz > 1) {
                         RCLCPP_INFO(this->get_logger(), "intersection passed");
                         navi_status = SEARCH_STRUCT_CROSS;
                         mission_idx++;
-                        if (mission_idx < (int)missions.size()) {
-                            auto m = std_msgs::msg::Int32();
-                            m.data = missions[mission_idx][1];
-                            intersect_type_pub->publish(m);
-                        }
                     }
                 }
                 if (move_status == MOVE_RIGHT || move_status == MOVE_LEFT) {
@@ -194,8 +144,7 @@ class MavRosNode : public rclcpp::Node {
                     uint16_t type_mask = 0xdc7;
                     if (move_status == MOVE_LEFT) vel_r = -0.2f;
                     if (slow_down) vel_r = vel_r * 0.6f;
-                    if (hori_p.x == 0) {
-                    } else {
+                    if (hori_p.x != 0) {
                         // find the intersection point of the hori struct line and the plane y = 0
                         float t = -hori_p.y / hori_v.y;
                         float z = hori_p.z + hori_v.z * t;
@@ -269,13 +218,37 @@ class MavRosNode : public rclcpp::Node {
                     float vel_r = 0;
                     float vel_d = 0.2f;
                     if (move_status == MOVE_UP) vel_d = -0.2f;
-                    if (slow_down) vel_d = vel_d * 0.6f;
-                    gettimeofday(&tv, NULL);
-                    if (((tv.tv_sec - tv_vert_line.tv_sec) * 1'000'000 + tv.tv_usec - tv_vert_line.tv_usec) < 500'000) {
-                        if (vert_line_p1u < 0.3) {
-                            vel_r = -0.12f;
-                        } else if (vert_line_p1u > 0.7) {
-                            vel_r = 0.12f;
+                    if (vert_p.x != 0) {
+                        float t = -vert_p.z / vert_v.z;
+                        float x = vert_p.x + vert_v.x * t;
+                        float y = vert_p.y + vert_v.y * t;
+                        if (last_struct_dist == 0 || fabsf(x - last_struct_dist) < 0.6f) { // our dist to struct will not change that large
+                            last_struct_dist = x;
+                            if (x < CLOSE_DIST_M) close_confirm_cnt++; else close_confirm_cnt = 0;
+                            if (x > FAR_DIST_M) far_confirm_cnt++; else far_confirm_cnt = 0;
+                            if (y > 0.2f) left_confirm_cnt++; else left_confirm_cnt = 0;
+                            if (y < -0.2f) right_confirm_cnt++; else right_confirm_cnt = 0;
+                            if (close_confirm_cnt > 2) {
+                                adj_cnt++;
+                                vel_f = -0.12f;
+                                RCLCPP_INFO(this->get_logger(), "too close, move away");
+                            } else if (far_confirm_cnt > 2) {
+                                adj_cnt++;
+                                vel_f = 0.12f;
+                                RCLCPP_INFO(this->get_logger(), "too far, move close");
+                            }
+                            if (left_confirm_cnt > 2) {
+                                vel_r = -0.12f;
+                                RCLCPP_INFO(this->get_logger(), "too right, move left");
+                            } else if (right_confirm_cnt > 2) {
+                                vel_r = 0.12f;
+                                RCLCPP_INFO(this->get_logger(), "too left, move right");
+                            }
+                            if (adj_cnt > 5) {
+                                adj_cnt = 0;
+                                far_confirm_cnt = 0;
+                                close_confirm_cnt = 0;
+                            }
                         }
                     }
                     if (fc_prx_too_close) {
@@ -377,10 +350,6 @@ class MavRosNode : public rclcpp::Node {
                                 mission_idx = 0;
                                 navi_status = SEARCH_STRUCT_CROSS;
                                 move_status = HOVER;
-                                auto m = std_msgs::msg::Int32();
-                                m.data = missions[0][1];
-                                intersect_type_pub->publish(m);
-                                last_wp_pos = cur_pos;
                             }
                         } else {
                             mission_idx = -1;
@@ -461,8 +430,6 @@ class MavRosNode : public rclcpp::Node {
         int parse_error = 0;
         int packet_rx_drop_count = 0;
         uint8_t mav_sysid = 0;
-        struct timeval tv_intersect = {0, 0};
-        float intersect_cog[2] = {0, 0};
         bool att_rcved = false;
         float cur_yaw = 0;
         std::vector<std::array<int, 3>> missions;
@@ -471,11 +438,14 @@ class MavRosNode : public rclcpp::Node {
         geometry_msgs::msg::Point last_wp_pos;
         int navi_status = SEARCH_STRUCT_CROSS;
         int move_status = HOVER;
+        int right_confirm_cnt = 0;
+        int left_confirm_cnt = 0;
         int low_confirm_cnt = 0;
         int high_confirm_cnt = 0;
         int close_confirm_cnt = 0;
         int far_confirm_cnt = 0;
         int align_confirm_cnt = 0;
+        int intersect_confirm_cnt = 0;
         int yaw_adj_cd = 0;
         float tgt_yaw = 0;
         unsigned int adj_cnt = 0;
@@ -490,11 +460,8 @@ class MavRosNode : public rclcpp::Node {
         rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr voltage_pub;
         rclcpp::Publisher<sensor_msgs::msg::Range>::SharedPtr sonar_pub;
         rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr vel_pub;
-        rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr intersect_type_pub;
         rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr is_armable_pub;
-        rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr intersec_sub;
-        rclcpp::Subscription<geometry_msgs::msg::Polygon>::SharedPtr hori_line_sub;
-        rclcpp::Subscription<geometry_msgs::msg::Polygon>::SharedPtr vert_line_sub;
+        rclcpp::Subscription<geometry_msgs::msg::Polygon>::SharedPtr vert_hori_line_sub;
         rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub;
         rclcpp::Subscription<std_msgs::msg::String>::SharedPtr cmd_sub;
         rclcpp::TimerBase::SharedPtr uart_timer;
