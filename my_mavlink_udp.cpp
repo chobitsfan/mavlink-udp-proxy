@@ -68,6 +68,7 @@ class MavRosNode : public rclcpp::Node {
             intersec_sub = this->create_subscription<geometry_msgs::msg::Point>("templateCOG", 1, [this](const geometry_msgs::msg::Point::SharedPtr msg) { intersect_callback(msg); });
             hori_line_sub = this->create_subscription<geometry_msgs::msg::Polygon>("hori_line", 1, [this](const geometry_msgs::msg::Polygon::SharedPtr msg) { hori_line_callback(msg); });
             vert_line_sub = this->create_subscription<geometry_msgs::msg::Polygon>("vert_line_polygon", 1, [this](const geometry_msgs::msg::Polygon::SharedPtr msg) { vert_line_callback(msg); });
+            cmd_sub = this->create_subscription<std_msgs::msg::String>("cmd", rclcpp::QoS(1).best_effort().durability_volatile(), [this](const std_msgs::msg::String::SharedPtr msg) { cmd_callback(msg); });
             uart_timer = this->create_wall_timer(2ms, [this](){ timer_callback(); });
         }
 
@@ -84,6 +85,21 @@ class MavRosNode : public rclcpp::Node {
         }
 
     private:
+        void cmd_callback(std_msgs::msg::String::SharedPtr cmd_msg) {
+            int len;
+            unsigned char buf[256];
+            mavlink_message_t msg;
+            std::cout << "rcv " << cmd_msg->data << "\n";
+            if (cmd_msg->data == "{\"cmd\": \"arm\"}") {
+                mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, 0, 0, MAV_CMD_COMPONENT_ARM_DISARM, 0, 1, 0, 0, 0, 0, 0, 0);
+                len = mavlink_msg_to_send_buffer(buf, &msg);
+                write(uart_fd_, buf, len);
+            } else if (cmd_msg->data == "{\"cmd\": \"disarm\"}") {
+                mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, 0, 0, MAV_CMD_COMPONENT_ARM_DISARM, 0, 0, 0, 0, 0, 0, 0, 0);
+                len = mavlink_msg_to_send_buffer(buf, &msg);
+                write(uart_fd_, buf, len);
+            }
+        }
         void odom_callback(const nav_msgs::msg::Odometry::SharedPtr odom_msg) {
             mavlink_message_t msg;
             float covar[21] = {0};
@@ -480,6 +496,7 @@ class MavRosNode : public rclcpp::Node {
         rclcpp::Subscription<geometry_msgs::msg::Polygon>::SharedPtr hori_line_sub;
         rclcpp::Subscription<geometry_msgs::msg::Polygon>::SharedPtr vert_line_sub;
         rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub;
+        rclcpp::Subscription<std_msgs::msg::String>::SharedPtr cmd_sub;
         rclcpp::TimerBase::SharedPtr uart_timer;
 };
 
