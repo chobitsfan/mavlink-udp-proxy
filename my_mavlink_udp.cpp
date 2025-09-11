@@ -51,6 +51,7 @@ class MavRosNode : public rclcpp::Node {
             vel_pub = this->create_publisher<geometry_msgs::msg::TwistStamped>("tgt_vel", rclcpp::QoS(1).best_effort().durability_volatile());
             is_armable_pub = this->create_publisher<std_msgs::msg::Int32>("is_armable", 1);
             odom_sub = this->create_subscription<nav_msgs::msg::Odometry>("odometry", rclcpp::QoS(1).best_effort().durability_volatile(), [this](const nav_msgs::msg::Odometry::SharedPtr msg) { odom_callback(msg); });
+            intersec_sub = this->create_subscription<geometry_msgs::msg::Point>("templateCOG", 1, [this](const geometry_msgs::msg::Point::SharedPtr msg) { intersect_callback(msg); });
             vert_hori_line_sub = this->create_subscription<geometry_msgs::msg::Polygon>("vert_hori_line", 1, [this](const geometry_msgs::msg::Polygon::SharedPtr msg) { vert_hori_line_callback(msg); });
             cmd_sub = this->create_subscription<std_msgs::msg::String>("cmd", rclcpp::QoS(1).best_effort().durability_volatile(), [this](const std_msgs::msg::String::SharedPtr msg) { cmd_callback(msg); });
             uart_timer = this->create_wall_timer(2ms, [this](){ timer_callback(); });
@@ -108,6 +109,11 @@ class MavRosNode : public rclcpp::Node {
             }
         }
 
+        void intersect_callback(const geometry_msgs::msg::Point::SharedPtr msg) {
+            //printf("intersection %f %f\n", msg->x, msg->y);
+            gettimeofday(&tv_intersect, NULL);
+        }
+
         void vert_hori_line_callback(const geometry_msgs::msg::Polygon::SharedPtr poly_msg) {
             unsigned char buf[256];
             mavlink_message_t msg;
@@ -120,8 +126,10 @@ class MavRosNode : public rclcpp::Node {
             if (yaw_adj_cd > 0) yaw_adj_cd--;
             if (mission_idx >= 0 && mission_idx < (int)missions.size()) {
                 if (navi_status == SEARCH_STRUCT_CROSS) {
+                    gettimeofday(&tv, NULL);
+                    bool intersect_detected = ((tv.tv_sec - tv_intersect.tv_sec) * 1'000'000 + tv.tv_usec - tv_intersect.tv_usec) < 500'000;
                     if (vert_p.x != 0 && hori_p.x != 0) intersect_confirm_cnt++;
-                    if (intersect_confirm_cnt > 2) {
+                    if (intersect_confirm_cnt > 2 || intersect_detected) {
                         intersect_confirm_cnt = 0;
                         RCLCPP_INFO(this->get_logger(), "arrival at waypoint %d", mission_idx);
                         navi_status = PASS_STRUCT_CROSS;
@@ -430,6 +438,7 @@ class MavRosNode : public rclcpp::Node {
         int parse_error = 0;
         int packet_rx_drop_count = 0;
         uint8_t mav_sysid = 0;
+        struct timeval tv_intersect = {0, 0};
         bool att_rcved = false;
         float cur_yaw = 0;
         std::vector<std::array<int, 3>> missions;
@@ -461,6 +470,7 @@ class MavRosNode : public rclcpp::Node {
         rclcpp::Publisher<sensor_msgs::msg::Range>::SharedPtr sonar_pub;
         rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr vel_pub;
         rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr is_armable_pub;
+        rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr intersec_sub;
         rclcpp::Subscription<geometry_msgs::msg::Polygon>::SharedPtr vert_hori_line_sub;
         rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub;
         rclcpp::Subscription<std_msgs::msg::String>::SharedPtr cmd_sub;
