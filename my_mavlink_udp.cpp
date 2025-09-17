@@ -10,6 +10,7 @@
 #include <errno.h> // Error integer and strerror() function
 #include <math.h>
 #include <time.h>
+#include <Eigen/Geometry>
 #include "mavlink/ardupilotmega/mavlink.h"
 #include "rclcpp/rclcpp.hpp"
 #include "std_msgs/msg/string.hpp"
@@ -49,7 +50,8 @@ class MavRosNode : public rclcpp::Node {
             voltage_pub = this->create_publisher<std_msgs::msg::Float32>("voltage", rclcpp::QoS(1).best_effort().durability_volatile());
             sonar_pub = this->create_publisher<sensor_msgs::msg::Range>("sonar", rclcpp::QoS(1).best_effort().durability_volatile());
             vel_pub = this->create_publisher<geometry_msgs::msg::TwistStamped>("tgt_vel", rclcpp::QoS(1).best_effort().durability_volatile());
-            is_armable_pub = this->create_publisher<std_msgs::msg::Int32>("is_armable", 1);
+            //is_armable_pub = this->create_publisher<std_msgs::msg::Int32>("is_armable", 1);
+            odom_cor_pub = this->create_publisher<nav_msgs::msg::Odometry>("odometry_corrected", rclcpp::QoS(1).best_effort().durability_volatile());
             odom_sub = this->create_subscription<nav_msgs::msg::Odometry>("odometry", rclcpp::QoS(1).best_effort().durability_volatile(), [this](const nav_msgs::msg::Odometry::SharedPtr msg) { odom_callback(msg); });
             intersec_sub = this->create_subscription<geometry_msgs::msg::Point>("templateCOG", 1, [this](const geometry_msgs::msg::Point::SharedPtr msg) { intersect_callback(msg); });
             vert_hori_line_sub = this->create_subscription<geometry_msgs::msg::Polygon>("vert_hori_line", 1, [this](const geometry_msgs::msg::Polygon::SharedPtr msg) { vert_hori_line_callback(msg); });
@@ -94,6 +96,28 @@ class MavRosNode : public rclcpp::Node {
             geometry_msgs::msg::Pose *pose = &odom_msg->pose.pose;
             geometry_msgs::msg::Vector3 *v = &odom_msg->twist.twist.linear;
             cur_pos = pose->position;
+
+            auto ori = pose->orientation;
+            float heading = atan2f(2 * (ori.w * ori.z + ori.x * ori.y), 1 - 2 * (ori.y * ori.y + ori.z * ori.z));
+            //std::cout << heading * 180.0 / M_PI << " deg\n";
+            if (fabsf(hori_line_angle - heading) > 0.2f) {
+                //RCLCPP_WARN(this->get_logger(), "vio heading %f deg, shelf hori angle %f deg", heading * 180.0 / M_PI, hori_line_angle * 180.0 / M_PI);
+                Eigen::Quaternionf q_z(Eigen::AngleAxisf(hori_line_angle - heading, Eigen::Vector3f::UnitZ()));
+                Eigen::Quaternionf q_heading(1, ori.x, ori.y, ori.z);
+                Eigen::Quaternionf q_cor = q_z * q_heading;
+                q_cor.normalize();
+                nav_msgs::msg::Odometry odom_cor;
+                odom_cor.header = odom_msg->header;
+                odom_cor.child_frame_id = "map";
+                odom_cor.pose.pose.position = odom_msg->pose.pose.position;
+                odom_cor.pose.pose.orientation.w = q_cor.w();
+                odom_cor.pose.pose.orientation.x = q_cor.x();
+                odom_cor.pose.pose.orientation.y = q_cor.y();
+                odom_cor.pose.pose.orientation.z = q_cor.z();
+                odom_cor.twist.twist.linear = odom_msg->twist.twist.linear;
+                odom_cor_pub->publish(odom_cor);
+            }
+
             if (mav_sysid != 0 && time_offset_ns != 0) {
                 q[0] = pose->orientation.w;
                 q[1] = pose->orientation.x;
@@ -123,6 +147,30 @@ class MavRosNode : public rclcpp::Node {
             auto vert_v = poly_msg->points[1];
             auto hori_p = poly_msg->points[2];
             auto hori_v = poly_msg->points[3];
+
+            //float hori_angle = atan2f(hori_v.y, hori_v.x);
+            //std::cout << "hori " << hori_angle * 180.0 / M_PI << " degrees\n";
+            if (hori_p.x != 0) {
+                float vy;
+                if (hori_v.x < 0) {
+                    vy = -hori_v.y;
+                } else {
+                    vy = hori_v.y;
+                }
+                float angle_y_hori = acosf(vy);
+                //std::cout << "raw hori " << angle_y_hori * 180 / M_PI << " deg\n";
+                hori_line_angles.push_back(angle_y_hori);
+                if (hori_line_angles.size() > 5) {
+                    hori_line_angles.pop_front();
+                    std::vector<float> angles(hori_line_angles.begin(), hori_line_angles.end());
+                    std::nth_element(angles.begin(), angles.begin() + 2, angles.end());
+                    hori_line_angle = angles[2];
+                    if (hori_line_angle > M_PI / 2) hori_line_angle = hori_line_angle - M_PI;
+                    //std::cout << "filtered hori " << hori_line_angle * 180.0 / M_PI << " deg\n";
+                }
+            }
+            //if (hori_p.x != 0) std::cout << "heading " << acosf(hori_v.y) * 180 / M_PI << " degrees\n";
+
             if (yaw_adj_cd > 0) yaw_adj_cd--;
             if (mission_idx >= 0 && mission_idx < (int)missions.size()) {
                 if (navi_status == SEARCH_STRUCT_CROSS) {
@@ -372,7 +420,7 @@ class MavRosNode : public rclcpp::Node {
                             len = mavlink_msg_to_send_buffer(buf, &msg);
                             write(uart_fd_, buf, len);
                         }
-                        if (hb.system_status == MAV_STATE_STANDBY) {
+                        /*if (hb.system_status == MAV_STATE_STANDBY) {
                             // if is armable = 1
                             auto m = std_msgs::msg::Int32();
                             m.data = 1;
@@ -381,7 +429,7 @@ class MavRosNode : public rclcpp::Node {
                             auto m = std_msgs::msg::Int32();
                             m.data = 0;
                             is_armable_pub->publish(m);
-                        }
+                        }*/
                         if (timesync_counter > 3) {
                             timesync_counter = 0;
                             clock_gettime(CLOCK_MONOTONIC, &tp);
@@ -465,11 +513,15 @@ class MavRosNode : public rclcpp::Node {
         struct timeval tv_vert_line = {0, 0};
         float vert_line_p1u = 0;
         int64_t time_offset_ns = 0;
+        float hori_line_angle = 0;
+        std::deque<float> hori_line_angles;
+        Eigen::Quaternionf heading_cor = Eigen::Quaternionf::Identity();
         rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr roll_pub;
         rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr voltage_pub;
         rclcpp::Publisher<sensor_msgs::msg::Range>::SharedPtr sonar_pub;
         rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr vel_pub;
-        rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr is_armable_pub;
+        //rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr is_armable_pub;
+        rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_cor_pub;
         rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr intersec_sub;
         rclcpp::Subscription<geometry_msgs::msg::Polygon>::SharedPtr vert_hori_line_sub;
         rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub;
