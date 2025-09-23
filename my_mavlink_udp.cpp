@@ -20,7 +20,7 @@
 #include "geometry_msgs/msg/point.hpp"
 #include "sensor_msgs/msg/range.hpp"
 #include "geometry_msgs/msg/twist_stamped.hpp"
-#include "geometry_msgs/msg/polygon.hpp"
+#include "geometry_msgs/msg/polygon_stamped.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 
 // ROS coordinate system, x axis = vehicle front
@@ -52,11 +52,11 @@ class MavRosNode : public rclcpp::Node {
             vel_pub = this->create_publisher<geometry_msgs::msg::TwistStamped>("tgt_vel", rclcpp::QoS(1).best_effort().durability_volatile());
             //is_armable_pub = this->create_publisher<std_msgs::msg::Int32>("is_armable", 1);
             odom_cor_pub = this->create_publisher<nav_msgs::msg::Odometry>("odometry_corrected", rclcpp::QoS(1).best_effort().durability_volatile());
-            odom_sub = this->create_subscription<nav_msgs::msg::Odometry>("odometry", rclcpp::QoS(1).best_effort().durability_volatile(), [this](const nav_msgs::msg::Odometry::SharedPtr msg) { odom_callback(msg); });
-            intersec_sub = this->create_subscription<geometry_msgs::msg::Point>("templateCOG", 1, [this](const geometry_msgs::msg::Point::SharedPtr msg) { intersect_callback(msg); });
-            vert_hori_line_sub = this->create_subscription<geometry_msgs::msg::Polygon>("vert_hori_line", 1, [this](const geometry_msgs::msg::Polygon::SharedPtr msg) { vert_hori_line_callback(msg); });
-            cmd_sub = this->create_subscription<std_msgs::msg::String>("cmd", rclcpp::QoS(1).best_effort().durability_volatile(), [this](const std_msgs::msg::String::SharedPtr msg) { cmd_callback(msg); });
-            uart_timer = this->create_wall_timer(2ms, [this](){ timer_callback(); });
+            odom_sub = this->create_subscription<nav_msgs::msg::Odometry>("odometry", rclcpp::QoS(1).best_effort().durability_volatile(), std::bind(&MavRosNode::odom_callback, this, std::placeholders::_1));
+            intersec_sub = this->create_subscription<geometry_msgs::msg::Point>("templateCOG", 1, std::bind(&MavRosNode::intersect_callback, this, std::placeholders::_1));
+            vert_hori_line_sub = this->create_subscription<geometry_msgs::msg::PolygonStamped>("vert_hori_line", 1, std::bind(&MavRosNode::vert_hori_line_callback, this, std::placeholders::_1));
+            cmd_sub = this->create_subscription<std_msgs::msg::String>("cmd", rclcpp::QoS(1).best_effort().durability_volatile(), std::bind(&MavRosNode::cmd_callback, this, std::placeholders::_1));
+            uart_timer = this->create_wall_timer(2ms, std::bind(&MavRosNode::timer_callback, this));
         }
 
         void read_mission(const char* csv_path) {
@@ -93,41 +93,46 @@ class MavRosNode : public rclcpp::Node {
             float q[4];
             int len;
             unsigned char buf[256];
-            geometry_msgs::msg::Pose *pose = &odom_msg->pose.pose;
-            geometry_msgs::msg::Vector3 *v = &odom_msg->twist.twist.linear;
-            cur_pos = pose->position;
+            auto pos = odom_msg->pose.pose.position;
+            auto ori = odom_msg->pose.pose.orientation;
+            auto vel = odom_msg->twist.twist.linear;
+            cur_pos = pos;
 
-            auto ori = pose->orientation;
             float heading = atan2f(2 * (ori.w * ori.z + ori.x * ori.y), 1 - 2 * (ori.y * ori.y + ori.z * ori.z));
             //std::cout << heading * 180.0 / M_PI << " deg\n";
-            if (fabsf(hori_line_angle - heading) > 0.2f) {
+            if (hori_line_angle != 0) {
                 //RCLCPP_WARN(this->get_logger(), "vio heading %f deg, shelf hori angle %f deg", heading * 180.0 / M_PI, hori_line_angle * 180.0 / M_PI);
                 Eigen::Quaternionf q_z(Eigen::AngleAxisf(hori_line_angle - heading, Eigen::Vector3f::UnitZ()));
                 Eigen::Quaternionf q_heading(1, ori.x, ori.y, ori.z);
                 Eigen::Quaternionf q_cor = q_z * q_heading;
                 q_cor.normalize();
+                //Eigen::Vector3f t_vio(pos.x, pos.y, pos.z);
+                //Eigen::Vector3f t_cor = q_cor * t_vio;
                 nav_msgs::msg::Odometry odom_cor;
                 odom_cor.header = odom_msg->header;
                 odom_cor.child_frame_id = "map";
-                odom_cor.pose.pose.position = odom_msg->pose.pose.position;
+                //odom_cor.pose.pose.position.x = t_cor.x();
+                //odom_cor.pose.pose.position.y = t_cor.y();
+                //odom_cor.pose.pose.position.z = t_cor.z();
+                odom_cor.pose.pose.position = pos;
                 odom_cor.pose.pose.orientation.w = q_cor.w();
                 odom_cor.pose.pose.orientation.x = q_cor.x();
                 odom_cor.pose.pose.orientation.y = q_cor.y();
                 odom_cor.pose.pose.orientation.z = q_cor.z();
-                odom_cor.twist.twist.linear = odom_msg->twist.twist.linear;
+                odom_cor.twist.twist.linear = vel;
                 odom_cor_pub->publish(odom_cor);
             }
 
             if (mav_sysid != 0 && time_offset_ns != 0) {
-                q[0] = pose->orientation.w;
-                q[1] = pose->orientation.x;
-                q[2] = -pose->orientation.y;
-                q[3] = -pose->orientation.z;
+                q[0] = ori.w;
+                q[1] = ori.x;
+                q[2] = -ori.y;
+                q[3] = -ori.z;
                 int64_t odom_fc_us = ((odom_msg->header.stamp.sec * 1000000000LL + odom_msg->header.stamp.nanosec) - time_offset_ns) / 1000;
-                mavlink_msg_att_pos_mocap_pack(mav_sysid, MY_COMP_ID, &msg, odom_fc_us, q, pose->position.x, -pose->position.y, -pose->position.z, covar);
+                mavlink_msg_att_pos_mocap_pack(mav_sysid, MY_COMP_ID, &msg, odom_fc_us, q, pos.x, -pos.y, -pos.z, covar);
                 len = mavlink_msg_to_send_buffer(buf, &msg);
                 write(uart_fd_, buf, len);
-                mavlink_msg_vision_speed_estimate_pack(mav_sysid, MY_COMP_ID, &msg, odom_fc_us, v->x, -v->y, -v->z, covar, 0);
+                mavlink_msg_vision_speed_estimate_pack(mav_sysid, MY_COMP_ID, &msg, odom_fc_us, vel.x, -vel.y, -vel.z, covar, 0);
                 len = mavlink_msg_to_send_buffer(buf, &msg);
                 write(uart_fd_, buf, len);
             }
@@ -138,15 +143,15 @@ class MavRosNode : public rclcpp::Node {
             gettimeofday(&tv_intersect, NULL);
         }
 
-        void vert_hori_line_callback(const geometry_msgs::msg::Polygon::SharedPtr poly_msg) {
+        void vert_hori_line_callback(const geometry_msgs::msg::PolygonStamped::SharedPtr poly_msg) {
             unsigned char buf[256];
             mavlink_message_t msg;
             struct timeval tv;
             int len;
-            auto vert_p = poly_msg->points[0];
-            auto vert_v = poly_msg->points[1];
-            auto hori_p = poly_msg->points[2];
-            auto hori_v = poly_msg->points[3];
+            auto vert_p = poly_msg->polygon.points[0];
+            auto vert_v = poly_msg->polygon.points[1];
+            auto hori_p = poly_msg->polygon.points[2];
+            auto hori_v = poly_msg->polygon.points[3];
 
             //float hori_angle = atan2f(hori_v.y, hori_v.x);
             //std::cout << "hori " << hori_angle * 180.0 / M_PI << " degrees\n";
@@ -523,7 +528,7 @@ class MavRosNode : public rclcpp::Node {
         //rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr is_armable_pub;
         rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_cor_pub;
         rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr intersec_sub;
-        rclcpp::Subscription<geometry_msgs::msg::Polygon>::SharedPtr vert_hori_line_sub;
+        rclcpp::Subscription<geometry_msgs::msg::PolygonStamped>::SharedPtr vert_hori_line_sub;
         rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub;
         rclcpp::Subscription<std_msgs::msg::String>::SharedPtr cmd_sub;
         rclcpp::TimerBase::SharedPtr uart_timer;
