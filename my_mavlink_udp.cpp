@@ -450,6 +450,7 @@ class MavRosNode : public rclcpp::Node {
                         att_rcved = true;
                         mavlink_attitude_t att;
                         mavlink_msg_attitude_decode(&msg, &att);
+                        cur_yaw = att.yaw;
                         auto m = std_msgs::msg::Float32();
                         m.data = att.roll;
                         roll_pub->publish(m);
