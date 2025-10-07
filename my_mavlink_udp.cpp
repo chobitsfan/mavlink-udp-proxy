@@ -38,7 +38,7 @@
 #define LAND 5
 #define HOVER 6
 
-#define CLOSE_DIST_M 0.5f
+#define CLOSE_DIST_M 0.6f
 #define FAR_DIST_M 0.9f
 
 using namespace std::chrono_literals;
@@ -98,6 +98,7 @@ class MavRosNode : public rclcpp::Node {
             auto vel = odom_msg->twist.twist.linear;
             cur_pos = pos;
 
+#if 0
             float heading = atan2f(2 * (ori.w * ori.z + ori.x * ori.y), 1 - 2 * (ori.y * ori.y + ori.z * ori.z));
             //std::cout << heading * 180.0 / M_PI << " deg\n";
             if (hori_line_angle != 0) {
@@ -121,7 +122,9 @@ class MavRosNode : public rclcpp::Node {
                 odom_cor.pose.pose.orientation.z = q_cor.z();
                 odom_cor.twist.twist.linear = vel;
                 odom_cor_pub->publish(odom_cor);
+                ori = odom_cor.pose.pose.orientation;
             }
+#endif
 
             if (mav_sysid != 0 && time_offset_ns != 0) {
                 q[0] = ori.w;
@@ -218,19 +221,19 @@ class MavRosNode : public rclcpp::Node {
                             if (x > FAR_DIST_M) far_confirm_cnt++; else far_confirm_cnt = 0;
                             if (low_confirm_cnt > 1) {
                                 vel_d = -0.12f;
-                                RCLCPP_INFO(this->get_logger(), "too low, move up");
+                                RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too low, move up");
                             } else if (high_confirm_cnt > 1) {
                                 vel_d = 0.12f;
-                                RCLCPP_INFO(this->get_logger(), "too high, move down");
+                                RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too high, move down");
                             }
                             if (close_confirm_cnt > 1) {
                                 adj_cnt++;
                                 vel_f = -0.12f;
-                                RCLCPP_INFO(this->get_logger(), "too close, move away");
+                                RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too close, move away");
                             } else if (far_confirm_cnt > 1) {
                                 adj_cnt++;
                                 vel_f = 0.12f;
-                                RCLCPP_INFO(this->get_logger(), "too far, move closer");
+                                RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too far, move closer");
                             }
                             if (adj_cnt > 5) {
                                 adj_cnt = 0;
@@ -238,7 +241,7 @@ class MavRosNode : public rclcpp::Node {
                                 close_confirm_cnt = 0;
                             }
 
-                            float vx, vy;
+                            /*float vx, vy;
                             if (hori_v.y < 0) {
                                 vx = -hori_v.x;
                                 vy = -hori_v.y;
@@ -254,13 +257,18 @@ class MavRosNode : public rclcpp::Node {
                                 //printf("angle_y_hori %f %f\n", angle_y_hori, vx);
                                 if (vx > 0) tgt_yaw = cur_yaw + angle_y_hori; else tgt_yaw = cur_yaw - angle_y_hori;
                                 RCLCPP_INFO_STREAM(this->get_logger(), "adjust heading " << (vx > 0 ? std::string("cw ") : std::string("ccw ")) <<  angle_y_hori * 180 / M_PI << " from " << cur_yaw * 180 / M_PI << " to " << tgt_yaw * 180 / M_PI);
+                            }*/
+                            if (fabsf(hori_line_angle) > 0.15f && yaw_adj_cd == 0) {
+                                yaw_adj_cd = 30;
+                                tgt_yaw = cur_yaw + hori_line_angle;
+                                RCLCPP_INFO(this->get_logger(), "adjust heading from %f to %f", cur_yaw, tgt_yaw);
                             }
                         }
                     }
                     if (yaw_adj_cd > 0) type_mask = 0x9c7;
                     if (fc_prx_too_close) {
                         vel_f = -0.15f;
-                        RCLCPP_INFO(this->get_logger(), "sonar: too close, move away");
+                        RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "sonar: too close, move away");
                     }
                     gettimeofday(&tv, NULL);
                     mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+(uint32_t)(tv.tv_usec*0.001), mav_sysid, 1, MAV_FRAME_BODY_OFFSET_NED, type_mask, 0, 0, 0, vel_f, vel_r, vel_d, 0, 0, 0, tgt_yaw, 0);
@@ -292,18 +300,18 @@ class MavRosNode : public rclcpp::Node {
                             if (close_confirm_cnt > 2) {
                                 adj_cnt++;
                                 vel_f = -0.12f;
-                                RCLCPP_INFO(this->get_logger(), "too close, move away");
+                                RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too close, move away");
                             } else if (far_confirm_cnt > 2) {
                                 adj_cnt++;
                                 vel_f = 0.12f;
-                                RCLCPP_INFO(this->get_logger(), "too far, move close");
+                                RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too far, move close");
                             }
                             if (left_confirm_cnt > 2) {
                                 vel_r = -0.12f;
-                                RCLCPP_INFO(this->get_logger(), "too right, move left");
+                                RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too right, move left");
                             } else if (right_confirm_cnt > 2) {
                                 vel_r = 0.12f;
-                                RCLCPP_INFO(this->get_logger(), "too left, move right");
+                                RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too left, move right");
                             }
                             if (adj_cnt > 5) {
                                 adj_cnt = 0;
@@ -314,7 +322,7 @@ class MavRosNode : public rclcpp::Node {
                     }
                     if (fc_prx_too_close) {
                         vel_f = -0.15f;
-                        RCLCPP_INFO(this->get_logger(), "sonar: too close, move away");
+                        RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "sonar: too close, move away");
                     }
                     gettimeofday(&tv, NULL);
                     mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+(uint32_t)(tv.tv_usec*0.001), mav_sysid, 1, MAV_FRAME_BODY_OFFSET_NED, 0xdc7, 0, 0, 0, vel_f, vel_r, vel_d, 0, 0, 0, 0, 0);
@@ -507,7 +515,7 @@ class MavRosNode : public rclcpp::Node {
         int high_confirm_cnt = 0;
         int close_confirm_cnt = 0;
         int far_confirm_cnt = 0;
-        int align_confirm_cnt = 0;
+        //int align_confirm_cnt = 0;
         int intersect_confirm_cnt = 0;
         int yaw_adj_cd = 0;
         float tgt_yaw = 0;
