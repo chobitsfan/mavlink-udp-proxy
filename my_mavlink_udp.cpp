@@ -51,7 +51,7 @@ class MavRosNode : public rclcpp::Node {
             sonar_pub = this->create_publisher<sensor_msgs::msg::Range>("sonar", rclcpp::QoS(1).best_effort().durability_volatile());
             vel_pub = this->create_publisher<geometry_msgs::msg::TwistStamped>("tgt_vel", rclcpp::QoS(1).best_effort().durability_volatile());
             //is_armable_pub = this->create_publisher<std_msgs::msg::Int32>("is_armable", 1);
-            odom_cor_pub = this->create_publisher<nav_msgs::msg::Odometry>("odometry_corrected", rclcpp::QoS(1).best_effort().durability_volatile());
+            //odom_cor_pub = this->create_publisher<nav_msgs::msg::Odometry>("odometry_corrected", rclcpp::QoS(1).best_effort().durability_volatile());
             odom_sub = this->create_subscription<nav_msgs::msg::Odometry>("odometry", rclcpp::QoS(1).best_effort().durability_volatile(), std::bind(&MavRosNode::odom_callback, this, std::placeholders::_1));
             intersec_sub = this->create_subscription<geometry_msgs::msg::Point>("templateCOG", 1, std::bind(&MavRosNode::intersect_callback, this, std::placeholders::_1));
             vert_hori_line_sub = this->create_subscription<geometry_msgs::msg::PolygonStamped>("vert_hori_line", 1, std::bind(&MavRosNode::vert_hori_line_callback, this, std::placeholders::_1));
@@ -433,6 +433,13 @@ class MavRosNode : public rclcpp::Node {
                             len = mavlink_msg_to_send_buffer(buf, &msg);
                             write(uart_fd_, buf, len);
                         }
+#if 0
+                        if (!batt_rcved) {
+                            mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, mav_sysid, 1, MAV_CMD_SET_MESSAGE_INTERVAL, 0, MAVLINK_MSG_ID_BATTERY_STATUS, 1000'000, 0, 0, 0, 0, 0);
+                            len = mavlink_msg_to_send_buffer(buf, &msg);
+                            write(uart_fd_, buf, len);
+                        }
+#endif
                         /*if (hb.system_status == MAV_STATE_STANDBY) {
                             // if is armable = 1
                             auto m = std_msgs::msg::Int32();
@@ -478,11 +485,13 @@ class MavRosNode : public rclcpp::Node {
                         rng.range = dist_sensor.current_distance * 0.01;
                         sonar_pub->publish(rng);
                     } else if (msg.msgid == MAVLINK_MSG_ID_BATTERY_STATUS) {
-                        std::cout << "check";
+                        batt_rcved = true;
                         mavlink_battery_status_t batt;
                         mavlink_msg_battery_status_decode(&msg, &batt);
+                        float voltage = batt.voltages[0] / 1000.0;
+                        printf("battery %fv\n", voltage);
                         auto m = std_msgs::msg::Float32();
-                        m.data = batt.voltages[0] / 1000.0;
+                        m.data = voltage;
                         voltage_pub->publish(m);
                     } else if (msg.msgid == MAVLINK_MSG_ID_TIMESYNC) {
                         mavlink_timesync_t sync;
@@ -528,6 +537,7 @@ class MavRosNode : public rclcpp::Node {
         float vert_line_p1u = 0;
         int64_t time_offset_ns = 0;
         float hori_line_angle = 0;
+        bool batt_rcved = false;
         std::deque<float> hori_line_angles;
         Eigen::Quaternionf heading_cor = Eigen::Quaternionf::Identity();
         rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr roll_pub;
@@ -535,7 +545,7 @@ class MavRosNode : public rclcpp::Node {
         rclcpp::Publisher<sensor_msgs::msg::Range>::SharedPtr sonar_pub;
         rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr vel_pub;
         //rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr is_armable_pub;
-        rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_cor_pub;
+        //rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_cor_pub;
         rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr intersec_sub;
         rclcpp::Subscription<geometry_msgs::msg::PolygonStamped>::SharedPtr vert_hori_line_sub;
         rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub;
