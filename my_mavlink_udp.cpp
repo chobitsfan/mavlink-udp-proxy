@@ -144,13 +144,14 @@ class MavRosNode : public rclcpp::Node {
 
         void intersect_callback(const geometry_msgs::msg::Point::SharedPtr msg) {
             //printf("intersection %f %f\n", msg->x, msg->y);
-            gettimeofday(&tv_intersect, NULL);
+            clock_gettime(CLOCK_MONOTONIC, &tp_intersect);
         }
 
         void vert_hori_line_callback(const geometry_msgs::msg::PolygonStamped::SharedPtr poly_msg) {
             unsigned char buf[256];
             mavlink_message_t msg;
-            struct timeval tv;
+            struct timespec tp;
+            clock_gettime(CLOCK_MONOTONIC, &tp);
             int len;
             auto vert_p = poly_msg->polygon.points[0];
             auto vert_v = poly_msg->polygon.points[1];
@@ -183,8 +184,7 @@ class MavRosNode : public rclcpp::Node {
             if (yaw_adj_cd > 0) yaw_adj_cd--;
             if (mission_idx >= 0 && mission_idx < (int)missions.size()) {
                 if (navi_status == SEARCH_STRUCT_CROSS) {
-                    gettimeofday(&tv, NULL);
-                    bool intersect_detected = ((tv.tv_sec - tv_intersect.tv_sec) * 1'000'000 + tv.tv_usec - tv_intersect.tv_usec) < 500'000;
+                    bool intersect_detected = ((tp.tv_sec - tp_intersect.tv_sec) * 1'000'000'000 + tp.tv_nsec - tp_intersect.tv_nsec) < 500'000'000;
                     if (vert_p.x != 0 && hori_p.x != 0) intersect_confirm_cnt++;
                     if (intersect_confirm_cnt > 2 || intersect_detected) {
                         intersect_confirm_cnt = 0;
@@ -195,8 +195,6 @@ class MavRosNode : public rclcpp::Node {
 
                         visualization_msgs::msg::Marker marker;
                         marker.header.frame_id = "body";
-                        struct timespec tp;
-                        clock_gettime(CLOCK_MONOTONIC, &tp);
                         marker.header.stamp.sec = tp.tv_sec;
                         marker.header.stamp.nanosec = tp.tv_nsec;
                         marker.ns = "wp";
@@ -296,8 +294,7 @@ class MavRosNode : public rclcpp::Node {
                         vel_f = -0.15f;
                         RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "sonar: too close, move away");
                     }
-                    gettimeofday(&tv, NULL);
-                    mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+(uint32_t)(tv.tv_usec*0.001), mav_sysid, 1, MAV_FRAME_BODY_OFFSET_NED, type_mask, 0, 0, 0, vel_f, vel_r, vel_d, 0, 0, 0, tgt_yaw, 0);
+                    mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tp.tv_sec*1000+(uint32_t)(tp.tv_nsec*0.000001), mav_sysid, 1, MAV_FRAME_BODY_OFFSET_NED, type_mask, 0, 0, 0, vel_f, vel_r, vel_d, 0, 0, 0, tgt_yaw, 0);
                     len = mavlink_msg_to_send_buffer(buf, &msg);
                     write(uart_fd_, buf, len);
 
@@ -350,8 +347,7 @@ class MavRosNode : public rclcpp::Node {
                         vel_f = -0.15f;
                         RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "sonar: too close, move away");
                     }
-                    gettimeofday(&tv, NULL);
-                    mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+(uint32_t)(tv.tv_usec*0.001), mav_sysid, 1, MAV_FRAME_BODY_OFFSET_NED, 0xdc7, 0, 0, 0, vel_f, vel_r, vel_d, 0, 0, 0, 0, 0);
+                    mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tp.tv_sec*1000+(uint32_t)(tp.tv_nsec*0.000001), mav_sysid, 1, MAV_FRAME_BODY_OFFSET_NED, 0xdc7, 0, 0, 0, vel_f, vel_r, vel_d, 0, 0, 0, 0, 0);
                     len = mavlink_msg_to_send_buffer(buf, &msg);
                     write(uart_fd_, buf, len);
 
@@ -368,8 +364,7 @@ class MavRosNode : public rclcpp::Node {
                     write(uart_fd_, buf, len);
                 } else if (move_status == HOVER) {
                     if (hori_p.x == 0) {
-                        gettimeofday(&tv, NULL);
-                        mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+(uint32_t)(tv.tv_usec*0.001), mav_sysid, 1, MAV_FRAME_BODY_OFFSET_NED, 0xdc7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+                        mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tp.tv_sec*1000+(uint32_t)(tp.tv_nsec*0.000001), mav_sysid, 1, MAV_FRAME_BODY_OFFSET_NED, 0xdc7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
                         len = mavlink_msg_to_send_buffer(buf, &msg);
                         write(uart_fd_, buf, len);
                     } else {
@@ -393,8 +388,7 @@ class MavRosNode : public rclcpp::Node {
                             vel_d = 0.12f;
                             RCLCPP_INFO(this->get_logger(), "too high, move down");
                         }
-                        gettimeofday(&tv, NULL);
-                        mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tv.tv_sec*1000+(uint32_t)(tv.tv_usec*0.001), mav_sysid, 1, MAV_FRAME_BODY_OFFSET_NED, 0xdc7, 0, 0, 0, vel_f, 0, vel_d, 0, 0, 0, 0, 0);
+                        mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tp.tv_sec*1000+(uint32_t)(tp.tv_nsec*0.000001), mav_sysid, 1, MAV_FRAME_BODY_OFFSET_NED, 0xdc7, 0, 0, 0, vel_f, 0, vel_d, 0, 0, 0, 0, 0);
                         len = mavlink_msg_to_send_buffer(buf, &msg);
                         write(uart_fd_, buf, len);
                     }
@@ -534,7 +528,7 @@ class MavRosNode : public rclcpp::Node {
         int parse_error = 0;
         int packet_rx_drop_count = 0;
         uint8_t mav_sysid = 0;
-        struct timeval tv_intersect = {0, 0};
+        struct timespec tp_intersect = {0, 0};
         bool att_rcved = false;
         float cur_yaw = 0;
         std::vector<std::array<int, 3>> missions;
