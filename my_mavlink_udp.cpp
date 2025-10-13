@@ -215,6 +215,29 @@ class MavRosNode : public rclcpp::Node {
                         marker.color.a = 1.0f;
                         marker.text = std::to_string(mission_idx);
                         wp_pub->publish(marker);
+                        if (vert_p.x != 0 && hori_p.x != 0) {
+                            marker.ns = "intersect";
+                            marker.type = visualization_msgs::msg::Marker::LINE_LIST;
+                            marker.scale.x = 0.02;
+                            marker.pose.position.x = 0;
+                            marker.pose.position.y = 0;
+                            marker.pose.position.z = 0;
+                            geometry_msgs::msg::Point h1, h2, v1, v2;
+                            h1.x = hori_p.x+hori_v.x;
+                            h1.y = hori_p.y+hori_v.y;
+                            h1.z = hori_p.z+hori_v.z;
+                            h2.x = hori_p.x-hori_v.x;
+                            h2.y = hori_p.y-hori_v.y;
+                            h2.z = hori_p.z-hori_v.z;
+                            v1.x = vert_p.x+vert_v.x;
+                            v1.y = vert_p.y+vert_v.y;
+                            v1.z = vert_p.z+vert_v.z;
+                            v2.x = vert_p.x-vert_v.x;
+                            v2.y = vert_p.y-vert_v.y;
+                            v2.z = vert_p.z-vert_v.z;
+                            marker.points = {h1, h2, v1, v2};
+                            wp_pub->publish(marker);
+                        }
                     }
                 } else if (navi_status == PASS_STRUCT_CROSS) {
                     float dy = cur_pos.y - last_wp_pos.y;
