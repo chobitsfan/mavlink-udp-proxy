@@ -47,11 +47,12 @@ class MavRosNode : public rclcpp::Node {
     public:
         MavRosNode(int uart_fd) : Node("mavlink_ros"), uart_fd_(uart_fd) {
             roll_pub = this->create_publisher<std_msgs::msg::Float32>("roll", rclcpp::QoS(1).best_effort().durability_volatile());
-            voltage_pub = this->create_publisher<std_msgs::msg::Float32>("voltage", rclcpp::QoS(1).best_effort().durability_volatile());
+            //voltage_pub = this->create_publisher<std_msgs::msg::Float32>("voltage", rclcpp::QoS(1).best_effort().durability_volatile());
             sonar_pub = this->create_publisher<sensor_msgs::msg::Range>("sonar", rclcpp::QoS(1).best_effort().durability_volatile());
             vel_pub = this->create_publisher<geometry_msgs::msg::TwistStamped>("tgt_vel", rclcpp::QoS(1).best_effort().durability_volatile());
             //is_armable_pub = this->create_publisher<std_msgs::msg::Int32>("is_armable", 1);
             //odom_cor_pub = this->create_publisher<nav_msgs::msg::Odometry>("odometry_corrected", rclcpp::QoS(1).best_effort().durability_volatile());
+            wp_pub = this->create_publisher<visualization_msgs::msg::Marker>("waypoints", rclcpp::QoS(1).best_effort().durability_volatile());
             odom_sub = this->create_subscription<nav_msgs::msg::Odometry>("odometry", rclcpp::QoS(1).best_effort().durability_volatile(), std::bind(&MavRosNode::odom_callback, this, std::placeholders::_1));
             intersec_sub = this->create_subscription<geometry_msgs::msg::Point>("templateCOG", 1, std::bind(&MavRosNode::intersect_callback, this, std::placeholders::_1));
             vert_hori_line_sub = this->create_subscription<geometry_msgs::msg::PolygonStamped>("vert_hori_line", 1, std::bind(&MavRosNode::vert_hori_line_callback, this, std::placeholders::_1));
@@ -191,6 +192,31 @@ class MavRosNode : public rclcpp::Node {
                         navi_status = PASS_STRUCT_CROSS;
                         move_status = missions[mission_idx][0];
                         last_wp_pos = cur_pos;
+
+                        visualization_msgs::msg::Marker marker;
+                        marker.header.frame_id = "body";
+                        struct timespec tp;
+                        clock_gettime(CLOCK_MONOTONIC, &tp);
+                        marker.header.stamp.sec = tp.tv_sec;
+                        marker.header.stamp.nanosec = tp.tv_nsec;
+                        marker.ns = "wp";
+                        marker.id = mission_idx;
+                        marker.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
+                        marker.action = visualization_msgs::msg::Marker::ADD;
+                        marker.pose.position.x = vert_p.x;
+                        marker.pose.position.y = vert_p.y;
+                        marker.pose.position.z = vert_p.z;
+                        marker.pose.orientation.x = 0.0;
+                        marker.pose.orientation.y = 0.0;
+                        marker.pose.orientation.z = 0.0;
+                        marker.pose.orientation.w = 1.0;
+                        marker.scale.z = 0.3;
+                        marker.color.r = 1.0f;
+                        marker.color.g = 1.0f;
+                        marker.color.b = 1.0f;
+                        marker.color.a = 1.0f;
+                        marker.text = std::to_string(mission_idx);
+                        wp_pub->publish(marker);
                     }
                 } else if (navi_status == PASS_STRUCT_CROSS) {
                     float dy = cur_pos.y - last_wp_pos.y;
@@ -433,13 +459,12 @@ class MavRosNode : public rclcpp::Node {
                             len = mavlink_msg_to_send_buffer(buf, &msg);
                             write(uart_fd_, buf, len);
                         }
-#if 0
-                        if (!batt_rcved) {
+                        // this is no voltage sensor on current warehouse drone
+                        /*if (!batt_rcved) {
                             mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, mav_sysid, 1, MAV_CMD_SET_MESSAGE_INTERVAL, 0, MAVLINK_MSG_ID_BATTERY_STATUS, 1000'000, 0, 0, 0, 0, 0);
                             len = mavlink_msg_to_send_buffer(buf, &msg);
                             write(uart_fd_, buf, len);
-                        }
-#endif
+                        }*/
                         /*if (hb.system_status == MAV_STATE_STANDBY) {
                             // if is armable = 1
                             auto m = std_msgs::msg::Int32();
@@ -484,7 +509,7 @@ class MavRosNode : public rclcpp::Node {
                         rng.max_range = 7.5;
                         rng.range = dist_sensor.current_distance * 0.01;
                         sonar_pub->publish(rng);
-                    } else if (msg.msgid == MAVLINK_MSG_ID_BATTERY_STATUS) {
+                    /*} else if (msg.msgid == MAVLINK_MSG_ID_BATTERY_STATUS) {
                         batt_rcved = true;
                         mavlink_battery_status_t batt;
                         mavlink_msg_battery_status_decode(&msg, &batt);
@@ -492,7 +517,7 @@ class MavRosNode : public rclcpp::Node {
                         printf("battery %fv\n", voltage);
                         auto m = std_msgs::msg::Float32();
                         m.data = voltage;
-                        voltage_pub->publish(m);
+                        voltage_pub->publish(m);*/
                     } else if (msg.msgid == MAVLINK_MSG_ID_TIMESYNC) {
                         mavlink_timesync_t sync;
                         mavlink_msg_timesync_decode(&msg, &sync);
@@ -541,7 +566,7 @@ class MavRosNode : public rclcpp::Node {
         std::deque<float> hori_line_angles;
         Eigen::Quaternionf heading_cor = Eigen::Quaternionf::Identity();
         rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr roll_pub;
-        rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr voltage_pub;
+        //rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr voltage_pub;
         rclcpp::Publisher<sensor_msgs::msg::Range>::SharedPtr sonar_pub;
         rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr vel_pub;
         //rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr is_armable_pub;
@@ -550,6 +575,7 @@ class MavRosNode : public rclcpp::Node {
         rclcpp::Subscription<geometry_msgs::msg::PolygonStamped>::SharedPtr vert_hori_line_sub;
         rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub;
         rclcpp::Subscription<std_msgs::msg::String>::SharedPtr cmd_sub;
+        rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr wp_pub;
         rclcpp::TimerBase::SharedPtr uart_timer;
 };
 
