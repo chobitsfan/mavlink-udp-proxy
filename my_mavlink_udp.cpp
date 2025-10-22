@@ -213,7 +213,7 @@ class MavRosNode : public rclcpp::Node {
                         marker.color.g = 1.0f;
                         marker.color.b = 1.0f;
                         marker.color.a = 1.0f;
-                        marker.text = std::to_string(mission_idx);
+                        marker.text = std::to_string(mission_idx+1);
                         wp_pub->publish(marker);
                         if (vert_p.x != 0 && hori_p.x != 0) {
                             marker.ns = "intersect";
