@@ -43,6 +43,38 @@
 
 using namespace std::chrono_literals;
 
+template <typename T, std::size_t N>
+class MyCircularBuffer {
+public:
+    void push(const T& value) {
+        data_[(head_ + size_) % N] = value;
+        if (size_ < N) {
+            ++size_;
+        } else {
+            head_ = (head_ + 1) % N; // overwrite oldest
+        }
+    }
+
+    std::optional<T> pop() {
+        if (empty()) return std::nullopt;
+        T value = data_[head_];
+        head_ = (head_ + 1) % N;
+        --size_;
+        return value;
+    }
+
+    bool empty() const { return size_ == 0; }
+    bool full() const { return size_ == N; }
+    std::size_t size() const { return size_; }
+    constexpr std::size_t capacity() const { return N; }
+    std::array<T, N> data_copy() const { return data_; }
+
+private:
+    std::array<T, N> data_{};
+    std::size_t head_ = 0;
+    std::size_t size_ = 0;
+};
+
 class MavRosNode : public rclcpp::Node {
     public:
         MavRosNode(int uart_fd) : Node("mavlink_ros"), uart_fd_(uart_fd) {
@@ -169,10 +201,9 @@ class MavRosNode : public rclcpp::Node {
                 }
                 float angle_y_hori = acosf(vy);
                 //std::cout << "raw hori " << angle_y_hori * 180 / M_PI << " deg\n";
-                hori_line_angles.push_back(angle_y_hori);
-                if (hori_line_angles.size() > 5) {
-                    hori_line_angles.pop_front();
-                    std::vector<float> angles(hori_line_angles.begin(), hori_line_angles.end());
+                hori_line_angles.push(angle_y_hori);
+                if (hori_line_angles.full()) {
+                    auto angles = hori_line_angles.data_copy();
                     std::nth_element(angles.begin(), angles.begin() + 2, angles.end());
                     hori_line_angle = angles[2];
                     if (hori_line_angle > M_PI / 2) hori_line_angle = hori_line_angle - M_PI;
@@ -580,7 +611,7 @@ class MavRosNode : public rclcpp::Node {
         int64_t time_offset_ns = 0;
         float hori_line_angle = 0;
         bool batt_rcved = false;
-        std::deque<float> hori_line_angles;
+        MyCircularBuffer<float, 5> hori_line_angles;
         Eigen::Quaternionf heading_cor = Eigen::Quaternionf::Identity();
         rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr roll_pub;
         //rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr voltage_pub;
