@@ -305,7 +305,7 @@ class MavRosNode : public rclcpp::Node {
                                 if (vx > 0) tgt_yaw = cur_yaw + angle_y_hori; else tgt_yaw = cur_yaw - angle_y_hori;
                                 RCLCPP_INFO_STREAM(this->get_logger(), "adjust heading " << (vx > 0 ? std::string("cw ") : std::string("ccw ")) <<  angle_y_hori * 180 / M_PI << " from " << cur_yaw * 180 / M_PI << " to " << tgt_yaw * 180 / M_PI);
                             }*/
-                            if (fabsf(hori_line_angle) > 0.15f && yaw_adj_cd == 0) {
+                            if (fabsf(hori_line_angle) > 0.1f && yaw_adj_cd == 0) {
                                 yaw_adj_cd = 30;
                                 tgt_yaw = cur_yaw + hori_line_angle;
                                 RCLCPP_INFO(this->get_logger(), "adjust heading from %f to %f", cur_yaw, tgt_yaw);
