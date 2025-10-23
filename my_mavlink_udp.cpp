@@ -189,20 +189,26 @@ class MavRosNode : public rclcpp::Node {
                         if (in_guided) {
                             mavlink_local_position_ned_t local_pos;
                             mavlink_msg_local_position_ned_decode(&msg, &local_pos);
-                            Eigen::Vector3f cur_local_pos(local_pos.x, -local_pos.y , -local_pos.z);
-                            Eigen::Vector3f tgt_dir_local = tgt_local - cur_local_pos;
-                            Eigen::Vector3f tgt_dir_body = cur_att.conjugate() * tgt_dir_local;
-                            tgt_dir_body.normalize();
-                            struct timespec tp;
-                            clock_gettime(CLOCK_MONOTONIC, &tp);
-                            geometry_msgs::msg::TwistStamped twist_msg;
-                            twist_msg.header.frame_id = "body";
-                            twist_msg.header.stamp.sec = tp.tv_sec;
-                            twist_msg.header.stamp.nanosec = tp.tv_nsec;
-                            twist_msg.twist.linear.x = tgt_dir_body.x();
-                            twist_msg.twist.linear.y = tgt_dir_body.y();
-                            twist_msg.twist.linear.z = tgt_dir_body.z();
-                            tgt_dir_pub_->publish(twist_msg);
+                            Eigen::Vector3f cur_pos_local(local_pos.x, -local_pos.y , -local_pos.z);
+                            Eigen::Vector3f tgt_dir_local = tgt_local - cur_pos_local;
+                            if (tgt_dir_local.squaredNorm() < 1) { // close enough
+                                mavlink_msg_set_mode_pack(mav_sysid, MY_COMP_ID, &msg, mav_sysid, 1, COPTER_MODE_BRAKE);
+                                len = mavlink_msg_to_send_buffer(buf, &msg);
+                                write(uart_fd_, buf, len);
+                            } else {
+                                Eigen::Vector3f tgt_dir_body = cur_att.conjugate() * tgt_dir_local;
+                                tgt_dir_body.normalize();
+                                struct timespec tp;
+                                clock_gettime(CLOCK_MONOTONIC, &tp);
+                                geometry_msgs::msg::TwistStamped twist_msg;
+                                twist_msg.header.frame_id = "body";
+                                twist_msg.header.stamp.sec = tp.tv_sec;
+                                twist_msg.header.stamp.nanosec = tp.tv_nsec;
+                                twist_msg.twist.linear.x = tgt_dir_body.x();
+                                twist_msg.twist.linear.y = tgt_dir_body.y();
+                                twist_msg.twist.linear.z = tgt_dir_body.z();
+                                tgt_dir_pub_->publish(twist_msg);
+                            }
                         }
                     }
                 }
@@ -222,7 +228,7 @@ class MavRosNode : public rclcpp::Node {
         bool att_rcved = false;
         bool local_pos_rcved = false;
         Eigen::Quaternionf cur_att;
-        Eigen::Vector3f tgt_local;
+        Eigen::Vector3f tgt_local{10, 0, 0};
 };
 
 int main(int argc, char *argv[]) {
