@@ -11,8 +11,10 @@ find_package(visualization_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package (Eigen3 REQUIRED)
 
 include_directories(${ament_INCLUDE_DIRS})
+include_directories(${EIGEN3_INCLUDE_DIRS})
 
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 
