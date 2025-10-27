@@ -131,7 +131,7 @@ class MavRosNode : public rclcpp::Node {
 #else
                             if (!in_guided) {
                                 Eigen::Vector3f tgt_body(30, 0 ,0);
-                                tgt_local = cur_att * tgt_body;
+                                tgt_local = cur_att * tgt_body + cur_pos_local;
                                 struct timespec tp;
                                 clock_gettime(CLOCK_MONOTONIC, &tp);
                                 geometry_msgs::msg::PointStamped p;
@@ -186,10 +186,12 @@ class MavRosNode : public rclcpp::Node {
                         cur_att.z() = -att.q4;
                     } else if (msg.msgid == MAVLINK_MSG_ID_LOCAL_POSITION_NED) {
                         local_pos_rcved = true;
+                        mavlink_local_position_ned_t local_pos;
+                        mavlink_msg_local_position_ned_decode(&msg, &local_pos);
+                        cur_pos_local[0] = local_pos.x;
+                        cur_pos_local[1] = -local_pos.y;
+                        cur_pos_local[2] = -local_pos.z;
                         if (in_guided) {
-                            mavlink_local_position_ned_t local_pos;
-                            mavlink_msg_local_position_ned_decode(&msg, &local_pos);
-                            Eigen::Vector3f cur_pos_local(local_pos.x, -local_pos.y , -local_pos.z);
                             Eigen::Vector3f tgt_dir_local = tgt_local - cur_pos_local;
                             if (tgt_dir_local.squaredNorm() < 1) { // close enough
                                 mavlink_msg_set_mode_pack(mav_sysid, MY_COMP_ID, &msg, mav_sysid, 1, COPTER_MODE_BRAKE);
@@ -229,6 +231,7 @@ class MavRosNode : public rclcpp::Node {
         bool local_pos_rcved = false;
         Eigen::Quaternionf cur_att;
         Eigen::Vector3f tgt_local{10, 0, 0};
+        Eigen::Vector3f cur_pos_local;
 };
 
 int main(int argc, char *argv[]) {
