@@ -212,6 +212,43 @@ class MavRosNode : public rclcpp::Node {
             }
             //if (hori_p.x != 0) std::cout << "heading " << acosf(hori_v.y) * 180 / M_PI << " degrees\n";
 
+#if 0
+            // just for test
+            if (hori_p.x != 0) {
+                // find the intersection point of the hori struct line and the plane y = 0
+                float t = -hori_p.y / hori_v.y;
+                float z = hori_p.z + hori_v.z * t;
+                float x = hori_p.x + hori_v.x * t;
+                hori_line_z.push(z);
+                if (hori_line_z.full()) {
+                    auto zz = hori_line_z.data_copy();
+                    std::nth_element(zz.begin(), zz.begin() + 2, zz.end());
+                    float mid_z = zz[2];
+                    if (mid_z > 0.1f) {
+                        RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too low, move up");
+                    } else if (mid_z < -0.2f) {
+                        RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too high, move down");
+                    }
+                }
+            }
+            if (vert_p.x != 0) {
+                float t = -vert_p.z / vert_v.z;
+                float x = vert_p.x + vert_v.x * t;
+                float y = vert_p.y + vert_v.y * t;
+                vert_line_y.push(y);
+                if (vert_line_y.full()) {
+                    auto yy = vert_line_y.data_copy();
+                    std::nth_element(yy.begin(), yy.begin() + 2, yy.end());
+                    float mid_y = yy[2];
+                    if (mid_y > 0.2f) {
+                        RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too right, move left");
+                    } else if (mid_y < -0.2f) {
+                        RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too left, move right");
+                    }
+                }
+            }
+#endif
+
             if (yaw_adj_cd > 0) yaw_adj_cd--;
             if (mission_idx >= 0 && mission_idx < (int)missions.size()) {
                 if (navi_status == SEARCH_STRUCT_CROSS) {
@@ -285,7 +322,6 @@ class MavRosNode : public rclcpp::Node {
                     float vel_f = 0;
                     uint16_t type_mask = 0xdc7;
                     if (move_status == MOVE_LEFT) vel_r = -0.2f;
-                    if (slow_down) vel_r = vel_r * 0.6f;
                     if (hori_p.x != 0) {
                         // find the intersection point of the hori struct line and the plane y = 0
                         float t = -hori_p.y / hori_v.y;
@@ -293,32 +329,32 @@ class MavRosNode : public rclcpp::Node {
                         float x = hori_p.x + hori_v.x * t;
                         if (last_struct_dist == 0 || fabsf(x - last_struct_dist) < 0.6f) { // our dist to struct will not change that large
                             last_struct_dist = x;
-                            if (z > 0.2f) low_confirm_cnt++; else low_confirm_cnt = 0;
-                            if (z < -0.2f) high_confirm_cnt++; else high_confirm_cnt = 0;
-                            if (x < CLOSE_DIST_M) close_confirm_cnt++; else close_confirm_cnt = 0;
-                            if (x > FAR_DIST_M) far_confirm_cnt++; else far_confirm_cnt = 0;
-                            if (low_confirm_cnt > 1) {
-                                vel_d = -0.12f;
-                                RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too low, move up");
-                            } else if (high_confirm_cnt > 1) {
-                                vel_d = 0.12f;
-                                RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too high, move down");
+                            hori_line_x.push(x);
+                            if (hori_line_x.full()) {
+                                auto xx = hori_line_x.data_copy();
+                                std::nth_element(xx.begin(), xx.begin() + 2, xx.end());
+                                float mid_x = xx[2];
+                                if (mid_x > FAR_DIST_M) {
+                                    vel_f = 0.12f;
+                                    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too far, move closer");
+                                } else if (mid_x < CLOSE_DIST_M) {
+                                    vel_f = -0.12f;
+                                    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too close, move away");
+                                }
                             }
-                            if (close_confirm_cnt > 1) {
-                                adj_cnt++;
-                                vel_f = -0.12f;
-                                RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too close, move away");
-                            } else if (far_confirm_cnt > 1) {
-                                adj_cnt++;
-                                vel_f = 0.12f;
-                                RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too far, move closer");
+                            hori_line_z.push(z);
+                            if (hori_line_z.full()) {
+                                auto zz = hori_line_z.data_copy();
+                                std::nth_element(zz.begin(), zz.begin() + 2, zz.end());
+                                float mid_z = zz[2];
+                                if (mid_z > 0.1f) {
+                                    vel_d = -0.15f;
+                                    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too low, move up");
+                                } else if (mid_z < -0.2f) {
+                                    vel_d = 0.1f;
+                                    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too high, move down");
+                                }
                             }
-                            if (adj_cnt > 5) {
-                                adj_cnt = 0;
-                                far_confirm_cnt = 0;
-                                close_confirm_cnt = 0;
-                            }
-
                             /*float vx, vy;
                             if (hori_v.y < 0) {
                                 vx = -hori_v.x;
@@ -336,7 +372,7 @@ class MavRosNode : public rclcpp::Node {
                                 if (vx > 0) tgt_yaw = cur_yaw + angle_y_hori; else tgt_yaw = cur_yaw - angle_y_hori;
                                 RCLCPP_INFO_STREAM(this->get_logger(), "adjust heading " << (vx > 0 ? std::string("cw ") : std::string("ccw ")) <<  angle_y_hori * 180 / M_PI << " from " << cur_yaw * 180 / M_PI << " to " << tgt_yaw * 180 / M_PI);
                             }*/
-                            if (fabsf(hori_line_angle) > 0.1f && yaw_adj_cd == 0) {
+                            if (fabsf(hori_line_angle) > 0.15f && yaw_adj_cd == 0) {
                                 yaw_adj_cd = 30;
                                 tgt_yaw = cur_yaw + hori_line_angle;
                                 RCLCPP_INFO(this->get_logger(), "adjust heading from %f to %f", cur_yaw, tgt_yaw);
@@ -370,30 +406,31 @@ class MavRosNode : public rclcpp::Node {
                         float y = vert_p.y + vert_v.y * t;
                         if (last_struct_dist == 0 || fabsf(x - last_struct_dist) < 0.6f) { // our dist to struct will not change that large
                             last_struct_dist = x;
-                            if (x < CLOSE_DIST_M) close_confirm_cnt++; else close_confirm_cnt = 0;
-                            if (x > FAR_DIST_M) far_confirm_cnt++; else far_confirm_cnt = 0;
-                            if (y > 0.2f) left_confirm_cnt++; else left_confirm_cnt = 0;
-                            if (y < -0.2f) right_confirm_cnt++; else right_confirm_cnt = 0;
-                            if (close_confirm_cnt > 2) {
-                                adj_cnt++;
-                                vel_f = -0.12f;
-                                RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too close, move away");
-                            } else if (far_confirm_cnt > 2) {
-                                adj_cnt++;
-                                vel_f = 0.12f;
-                                RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too far, move close");
+                            vert_line_x.push(x);
+                            if (vert_line_x.full()) {
+                                auto xx = vert_line_x.data_copy();
+                                std::nth_element(xx.begin(), xx.begin() + 2, xx.end());
+                                float mid_x = xx[2];
+                                if (mid_x > FAR_DIST_M) {
+                                    vel_f = 0.12f;
+                                    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too far, move closer");
+                                } else if (mid_x < CLOSE_DIST_M) {
+                                    vel_f = -0.12f;
+                                    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too close, move away");
+                                }
                             }
-                            if (left_confirm_cnt > 2) {
-                                vel_r = -0.12f;
-                                RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too right, move left");
-                            } else if (right_confirm_cnt > 2) {
-                                vel_r = 0.12f;
-                                RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too left, move right");
-                            }
-                            if (adj_cnt > 5) {
-                                adj_cnt = 0;
-                                far_confirm_cnt = 0;
-                                close_confirm_cnt = 0;
+                            vert_line_y.push(y);
+                            if (vert_line_y.full()) {
+                                auto yy = vert_line_y.data_copy();
+                                std::nth_element(yy.begin(), yy.begin() + 2, yy.end());
+                                float mid_y = yy[2];
+                                if (mid_y > 0.2f) {
+                                    vel_r = -0.12f;
+                                    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too right, move left");
+                                } else if (mid_y < -0.2f) {
+                                    vel_r = 0.12f;
+                                    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too left, move right");
+                                }
                             }
                         }
                     }
@@ -591,20 +628,11 @@ class MavRosNode : public rclcpp::Node {
         geometry_msgs::msg::Point last_wp_pos;
         int navi_status = SEARCH_STRUCT_CROSS;
         int move_status = HOVER;
-        int right_confirm_cnt = 0;
-        int left_confirm_cnt = 0;
-        int low_confirm_cnt = 0;
-        int high_confirm_cnt = 0;
-        int close_confirm_cnt = 0;
-        int far_confirm_cnt = 0;
-        //int align_confirm_cnt = 0;
         int intersect_confirm_cnt = 0;
         int yaw_adj_cd = 0;
         float tgt_yaw = 0;
-        unsigned int adj_cnt = 0;
         bool dist_sensor_rcved = false;
         bool fc_prx_too_close = false;
-        bool slow_down = false;
         float last_struct_dist = 0;
         struct timeval tv_vert_line = {0, 0};
         float vert_line_p1u = 0;
@@ -612,6 +640,10 @@ class MavRosNode : public rclcpp::Node {
         float hori_line_angle = 0;
         bool batt_rcved = false;
         MyCircularBuffer<float, 5> hori_line_angles;
+        MyCircularBuffer<float, 5> hori_line_x;
+        MyCircularBuffer<float, 5> hori_line_z;
+        MyCircularBuffer<float, 5> vert_line_x;
+        MyCircularBuffer<float, 5> vert_line_y;
         Eigen::Quaternionf heading_cor = Eigen::Quaternionf::Identity();
         rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr roll_pub;
         //rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr voltage_pub;
