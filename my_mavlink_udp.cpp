@@ -253,8 +253,10 @@ class MavRosNode : public rclcpp::Node {
             if (mission_idx >= 0 && mission_idx < (int)missions.size()) {
                 if (navi_status == SEARCH_STRUCT_CROSS) {
                     bool intersect_detected = ((tp.tv_sec - tp_intersect.tv_sec) * 1'000'000'000 + tp.tv_nsec - tp_intersect.tv_nsec) < 500'000'000;
-                    if (vert_p.x != 0 && hori_p.x != 0) intersect_confirm_cnt++;
-                    if (intersect_confirm_cnt > 2 || intersect_detected) {
+                    if (vert_p.x != 0 && hori_p.x != 0) intersect_confirm_cnt++; else intersect_confirm_cnt = 0;
+                    int cnt_needed = 2;
+                    if (missions[mission_idx][1] == 1) cnt_needed = 0; // end of shelves, horizontal strcuture discontinued
+                    if (intersect_confirm_cnt > cnt_needed || intersect_detected) {
                         intersect_confirm_cnt = 0;
                         RCLCPP_INFO(this->get_logger(), "arrival at waypoint %d", mission_idx);
                         navi_status = PASS_STRUCT_CROSS;
@@ -347,7 +349,7 @@ class MavRosNode : public rclcpp::Node {
                                 auto zz = hori_line_z.data_copy();
                                 std::nth_element(zz.begin(), zz.begin() + 2, zz.end());
                                 float mid_z = zz[2];
-                                if (mid_z > 0.1f) {
+                                if (mid_z > 0.05f) {
                                     vel_d = -0.15f;
                                     RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too low, move up");
                                 } else if (mid_z < -0.2f) {
