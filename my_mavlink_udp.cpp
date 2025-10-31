@@ -21,6 +21,8 @@
 #include "geometry_msgs/msg/twist_stamped.hpp"
 #include "sensor_msgs/msg/point_cloud.hpp"
 #include "nav_msgs/msg/odometry.hpp"
+#include "tf2_ros/transform_broadcaster.h"
+#include "geometry_msgs/msg/transform_stamped.hpp"
 
 using namespace std::chrono_literals;
 
@@ -28,6 +30,7 @@ using namespace std::chrono_literals;
 
 #define MY_COMP_ID 191
 #define MY_NUM_PFDS 1
+#define MAX_TF_QUEUE_SIZE 40
 
 class MavRosNode : public rclcpp::Node {
     public:
@@ -38,9 +41,37 @@ class MavRosNode : public rclcpp::Node {
             tgt_dir_pub_ = this->create_publisher<geometry_msgs::msg::TwistStamped>("target_direction", rclcpp::QoS(1).best_effort().durability_volatile());
             odo_pub_ = this->create_publisher<nav_msgs::msg::Odometry>("fc_odometry", rclcpp::QoS(1).best_effort().durability_volatile());
             uart_timer_ = this->create_wall_timer(2ms, [this](){ timer_callback(); });
+            tf_br = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
+            pub_tf_thread = std::thread(&MavRosNode::pub_tf_func, this);
+        }
+
+        ~MavRosNode() {
+            {
+                std::lock_guard<std::mutex> lock(tf_mtx);
+                should_exit = true;
+                tf_cv.notify_one();
+            }
+            pub_tf_thread.join();
         }
 
     private:
+        void pub_tf_func() {
+            while (true) {
+                std::deque<geometry_msgs::msg::TransformStamped> local_queue;
+                {
+                    std::unique_lock<std::mutex> lock(tf_mtx);
+                    tf_cv.wait(lock, [this] { return !tf_queue.empty() || should_exit; }); // Wait until queue has items OR should exit
+                    if (should_exit) return;
+                    // Grab ALL pending work
+                    local_queue.swap(tf_queue);
+                } // Automatic unlock
+                // Process all items without holding lock
+                while (!local_queue.empty()) {
+                    tf_br->sendTransform(local_queue.front()); // sendTransform may take some time
+                    local_queue.pop_front();
+                }
+            }
+        }
         void odom_callback(const nav_msgs::msg::Odometry::SharedPtr odom_msg) {
             mavlink_message_t msg;
             float covar[21] = {0};
@@ -212,6 +243,22 @@ class MavRosNode : public rclcpp::Node {
                         odo_msg.twist.twist.linear.z = -local_pos.vz;
                         odo_pub_->publish(odo_msg);
 
+                        geometry_msgs::msg::TransformStamped tf;
+                        tf.header.frame_id = "map";
+                        tf.header.stamp.sec = tp.tv_sec;
+                        tf.header.stamp.nanosec = tp.tv_nsec;
+                        tf.child_frame_id = "fc";
+                        tf.transform.translation.x = local_pos.x;
+                        tf.transform.translation.y = -local_pos.y;
+                        tf.transform.translation.z = -local_pos.z;
+                        tf.transform.rotation = odo_msg.pose.pose.orientation;
+                        {
+                            std::lock_guard<std::mutex> lock(tf_mtx);
+                            if (tf_queue.size() >= MAX_TF_QUEUE_SIZE) tf_queue.pop_front();
+                            tf_queue.push_back(tf);
+                            tf_cv.notify_one(); // wake up worker
+                        } // Hold locks for the shortest time possible
+
                         if (in_guided) {
                             Eigen::Vector3f tgt_dir_local = tgt_local - cur_pos_local;
                             if (tgt_dir_local.squaredNorm() < 1) { // close enough
@@ -222,7 +269,7 @@ class MavRosNode : public rclcpp::Node {
                                 Eigen::Vector3f tgt_dir_body = cur_att.conjugate() * tgt_dir_local;
                                 tgt_dir_body.normalize();
                                 geometry_msgs::msg::TwistStamped twist_msg;
-                                twist_msg.header.frame_id = "body";
+                                twist_msg.header.frame_id = "fc";
                                 twist_msg.header.stamp.sec = tp.tv_sec;
                                 twist_msg.header.stamp.nanosec = tp.tv_nsec;
                                 twist_msg.twist.linear.x = tgt_dir_body.x();
@@ -246,12 +293,18 @@ class MavRosNode : public rclcpp::Node {
         rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr avd_dir_sub_;
         rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
         rclcpp::TimerBase::SharedPtr uart_timer_;
+        std::unique_ptr<tf2_ros::TransformBroadcaster> tf_br;
         int64_t time_offset_ns = 0;
         bool att_rcved = false;
         bool local_pos_rcved = false;
         Eigen::Quaternionf cur_att;
         Eigen::Vector3f tgt_local{10, 0, 0};
         Eigen::Vector3f cur_pos_local;
+        std::mutex tf_mtx;
+        std::condition_variable tf_cv;
+        std::deque<geometry_msgs::msg::TransformStamped> tf_queue;
+        std::thread pub_tf_thread;
+        bool should_exit = false;
 };
 
 int main(int argc, char *argv[]) {
