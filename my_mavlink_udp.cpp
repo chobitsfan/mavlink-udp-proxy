@@ -24,7 +24,7 @@
 
 using namespace std::chrono_literals;
 
-// ROS coordinate system, x axis = vehicle front
+// ROS coordinate system, x axis = vehicle front, Front - Left - Up
 
 #define MY_COMP_ID 191
 #define MY_NUM_PFDS 1
@@ -36,6 +36,7 @@ class MavRosNode : public rclcpp::Node {
             odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>("odometry", rclcpp::QoS(1).best_effort().durability_volatile(), [this](const nav_msgs::msg::Odometry::SharedPtr odom_msg) { odom_callback(odom_msg); });
             tgt_p_pub_ = this->create_publisher<geometry_msgs::msg::PointStamped>("target_point", rclcpp::QoS(1).best_effort().durability_volatile());
             tgt_dir_pub_ = this->create_publisher<geometry_msgs::msg::TwistStamped>("target_direction", rclcpp::QoS(1).best_effort().durability_volatile());
+            odo_pub_ = this->create_publisher<nav_msgs::msg::Odometry>("fc_odometry", rclcpp::QoS(1).best_effort().durability_volatile());
             uart_timer_ = this->create_wall_timer(2ms, [this](){ timer_callback(); });
         }
 
@@ -130,7 +131,7 @@ class MavRosNode : public rclcpp::Node {
                             in_guided = true;
 #else
                             if (!in_guided) {
-                                Eigen::Vector3f tgt_body(30, 0 ,0);
+                                Eigen::Vector3f tgt_body(30, 0, 0.5f); // FLU, a liitle up
                                 tgt_local = cur_att * tgt_body + cur_pos_local;
                                 struct timespec tp;
                                 clock_gettime(CLOCK_MONOTONIC, &tp);
@@ -191,6 +192,26 @@ class MavRosNode : public rclcpp::Node {
                         cur_pos_local[0] = local_pos.x;
                         cur_pos_local[1] = -local_pos.y;
                         cur_pos_local[2] = -local_pos.z;
+
+                        struct timespec tp;
+                        clock_gettime(CLOCK_MONOTONIC, &tp);
+                        nav_msgs::msg::Odometry odo_msg;
+                        odo_msg.header.frame_id = "map";
+                        odo_msg.header.stamp.sec = tp.tv_sec;
+                        odo_msg.header.stamp.nanosec = tp.tv_nsec;
+                        odo_msg.child_frame_id = "map";
+                        odo_msg.pose.pose.position.x = local_pos.x;
+                        odo_msg.pose.pose.position.y = -local_pos.y;
+                        odo_msg.pose.pose.position.z = -local_pos.z;
+                        odo_msg.pose.pose.orientation.x = cur_att.x();
+                        odo_msg.pose.pose.orientation.y = cur_att.y();
+                        odo_msg.pose.pose.orientation.z = cur_att.z();
+                        odo_msg.pose.pose.orientation.w = cur_att.w();
+                        odo_msg.twist.twist.linear.x = local_pos.vx;
+                        odo_msg.twist.twist.linear.y = -local_pos.vy;
+                        odo_msg.twist.twist.linear.z = -local_pos.vz;
+                        odo_pub_->publish(odo_msg);
+
                         if (in_guided) {
                             Eigen::Vector3f tgt_dir_local = tgt_local - cur_pos_local;
                             if (tgt_dir_local.squaredNorm() < 1) { // close enough
@@ -200,8 +221,6 @@ class MavRosNode : public rclcpp::Node {
                             } else {
                                 Eigen::Vector3f tgt_dir_body = cur_att.conjugate() * tgt_dir_local;
                                 tgt_dir_body.normalize();
-                                struct timespec tp;
-                                clock_gettime(CLOCK_MONOTONIC, &tp);
                                 geometry_msgs::msg::TwistStamped twist_msg;
                                 twist_msg.header.frame_id = "body";
                                 twist_msg.header.stamp.sec = tp.tv_sec;
@@ -223,6 +242,7 @@ class MavRosNode : public rclcpp::Node {
         bool in_guided = false;
         rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr tgt_p_pub_;
         rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr tgt_dir_pub_;
+        rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odo_pub_;
         rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr avd_dir_sub_;
         rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
         rclcpp::TimerBase::SharedPtr uart_timer_;
