@@ -41,6 +41,8 @@
 #define CLOSE_DIST_M 0.6f
 #define FAR_DIST_M 0.9f
 
+#define TAKEOFF_ALT_M 5.0f
+
 using namespace std::chrono_literals;
 
 template <typename T, std::size_t N>
@@ -116,6 +118,10 @@ class MavRosNode : public rclcpp::Node {
                 write(uart_fd_, buf, len);
             } else if (cmd_msg->data == "{\"cmd\": \"disarm\"}") {
                 mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, 0, 0, MAV_CMD_COMPONENT_ARM_DISARM, 0, 0, 0, 0, 0, 0, 0, 0);
+                len = mavlink_msg_to_send_buffer(buf, &msg);
+                write(uart_fd_, buf, len);
+            } else if (cmd_msg->data == "{\"cmd\": \"takeoff\"}" || cmd_msg->data == "takeoff") {
+                mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, 0, 0, MAV_CMD_NAV_TAKEOFF, 0, 0, 0, 0, 0, 0, 0, TAKEOFF_ALT_M);
                 len = mavlink_msg_to_send_buffer(buf, &msg);
                 write(uart_fd_, buf, len);
             }
