@@ -27,7 +27,6 @@
 
 #define MY_COMP_ID 191
 
-#define MAX_WP_DIST_M 8
 
 #define SEARCH_STRUCT_CROSS 1
 #define PASS_STRUCT_CROSS 2
@@ -38,10 +37,11 @@
 #define LAND 5
 #define HOVER 6
 
+#define MAX_WP_DIST_M 8
 #define CLOSE_DIST_M 0.6f
 #define FAR_DIST_M 0.9f
-
 #define TAKEOFF_ALT_M 5.0f
+#define HORI_SPD 0.2f
 
 using namespace std::chrono_literals;
 
@@ -325,11 +325,11 @@ class MavRosNode : public rclcpp::Node {
                     }
                 }
                 if (move_status == MOVE_RIGHT || move_status == MOVE_LEFT) {
-                    float vel_r = 0.2f;
+                    float vel_r = HORI_SPD;
                     float vel_d = 0;
                     float vel_f = 0;
                     uint16_t type_mask = 0xdc7;
-                    if (move_status == MOVE_LEFT) vel_r = -0.2f;
+                    if (move_status == MOVE_LEFT) vel_r = -HORI_SPD;
                     if (hori_p.x != 0) {
                         // find the intersection point of the hori struct line and the plane y = 0
                         float t = -hori_p.y / hori_v.y;
