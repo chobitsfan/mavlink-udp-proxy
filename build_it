@@ -1,2 +1,0 @@
-#!/bin/bash
-gcc -O1 -g0 -Wall -Wno-address-of-packed-member -Wno-unused-result my_mavlink_udp.c -o mavlink_udp -lm
