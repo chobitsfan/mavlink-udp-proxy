@@ -41,7 +41,7 @@
 #define CLOSE_DIST_M 0.6f
 #define FAR_DIST_M 0.9f
 #define TAKEOFF_ALT_M 5.0f
-#define HORI_SPD 0.2f
+#define HORI_SPD 0.3f
 
 using namespace std::chrono_literals;
 
@@ -537,7 +537,7 @@ class MavRosNode : public rclcpp::Node {
                                 RCLCPP_INFO(this->get_logger(), "mission start");
                                 mission_idx = 0;
                                 navi_status = SEARCH_STRUCT_CROSS;
-                                move_status = HOVER;
+                                move_status = MOVE_UP;
                             }
                         } else {
                             mission_idx = -1;
