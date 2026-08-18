@@ -30,6 +30,8 @@
 
 #define SEARCH_STRUCT_CROSS 1
 #define PASS_STRUCT_CROSS 2
+#define IDLE 1000
+
 #define MOVE_UP 1
 #define MOVE_RIGHT 2
 #define MOVE_DOWN 3
@@ -37,11 +39,12 @@
 #define LAND 5
 #define HOVER 6
 
-#define MAX_WP_DIST_M 8
+#define END_OF_SHELF 1
+
 #define CLOSE_DIST_M 0.6f
 #define FAR_DIST_M 0.9f
-#define TAKEOFF_ALT_M 5.0f
-#define HORI_SPD 0.3f
+#define TAKEOFF_ALT_M 1.0f
+#define HORI_SPD 0.2f
 
 using namespace std::chrono_literals;
 
@@ -97,9 +100,9 @@ class MavRosNode : public rclcpp::Node {
         void read_mission(const char* csv_path) {
             FILE *file = fopen(csv_path, "r");
             if (file) {
-                int act, type, dist_cm;
-                while (fscanf(file, "%d ,%d ,%d", &act, &type, &dist_cm) == 3) {
-                    missions.push_back({act, type, dist_cm});
+                int act, arg1, arg2;
+                while (fscanf(file, "%d ,%d ,%d", &act, &arg1, &arg2) == 3) {
+                    missions.push_back({act, arg1, arg2});
                 }
                 printf("mission loaded, total %ld\n", missions.size());
                 fclose(file);
@@ -261,7 +264,7 @@ class MavRosNode : public rclcpp::Node {
                     bool intersect_detected = ((tp.tv_sec - tp_intersect.tv_sec) * 1'000'000'000 + tp.tv_nsec - tp_intersect.tv_nsec) < 500'000'000;
                     if (vert_p.x != 0 && hori_p.x != 0) intersect_confirm_cnt++; else intersect_confirm_cnt = 0;
                     int cnt_needed = 2;
-                    if (missions[mission_idx][1] == 1) cnt_needed = 0; // end of shelves, horizontal strcuture discontinued
+                    if (missions[mission_idx][1] == END_OF_SHELF) cnt_needed = 0; // end of shelf, horizontal strcuture discontinued
                     if (intersect_confirm_cnt > cnt_needed || intersect_detected) {
                         intersect_confirm_cnt = 0;
                         RCLCPP_INFO(this->get_logger(), "arrival at waypoint %d", mission_idx);
@@ -534,10 +537,14 @@ class MavRosNode : public rclcpp::Node {
                         }
                         if (hb.custom_mode == COPTER_MODE_GUIDED) {
                             if (mission_idx == -1) {
-                                RCLCPP_INFO(this->get_logger(), "mission start");
+                                RCLCPP_INFO(this->get_logger(), "move to shelves position");
+                                clock_gettime(CLOCK_MONOTONIC, &tp);
+                                mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tp.tv_sec*1000+tp.tv_nsec/1000000, mav_sysid, 1, MAV_FRAME_LOCAL_OFFSET_NED, 0x0DF8, 1.8f, -1.8f, -0.3f, 0, 0, 0, 0, 0, 0, 0, 0);
+                                len = mavlink_msg_to_send_buffer(buf, &msg);
+                                write(uart_fd_, buf, len);
                                 mission_idx = 0;
-                                navi_status = SEARCH_STRUCT_CROSS;
-                                move_status = MOVE_UP;
+                                navi_status = IDLE;
+                                move_status = IDLE;
                             }
                         } else {
                             mission_idx = -1;
@@ -549,6 +556,11 @@ class MavRosNode : public rclcpp::Node {
                         }
                         if (!dist_sensor_rcved) {
                             mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, mav_sysid, 1, MAV_CMD_SET_MESSAGE_INTERVAL, 0, MAVLINK_MSG_ID_DISTANCE_SENSOR, 100'000, 0, 0, 0, 0, 0);
+                            len = mavlink_msg_to_send_buffer(buf, &msg);
+                            write(uart_fd_, buf, len);
+                        }
+                        if (local_pos_not_rcved) {
+                            mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, mav_sysid, 1, MAV_CMD_SET_MESSAGE_INTERVAL, 0, MAVLINK_MSG_ID_LOCAL_POSITION_NED, 1'000'000, 0, 0, 0, 0, 0);
                             len = mavlink_msg_to_send_buffer(buf, &msg);
                             write(uart_fd_, buf, len);
                         }
@@ -618,6 +630,19 @@ class MavRosNode : public rclcpp::Node {
                             time_offset_ns = sync.ts1 - sync.tc1;
                             printf("time offset: %ld ns\n", time_offset_ns);
                         }
+                    } else if (msg.msgid == MAVLINK_MSG_ID_LOCAL_POSITION_NED) {
+                        local_pos_not_rcved = false;
+                        mavlink_local_position_ned_t pos;
+                        mavlink_msg_local_position_ned_decode(&msg, &pos);
+                        if (mission_idx == 0 && navi_status == IDLE && move_status == IDLE) {
+                            float x_diff = pos.x - 1.8f;
+                            float y_diff = pos.y - (-1.8f);
+                            if (x_diff * x_diff + y_diff * y_diff <= 0.25f) {
+                                RCLCPP_INFO(this->get_logger(), "in position");
+                                navi_status = SEARCH_STRUCT_CROSS;
+                                move_status = MOVE_UP;
+                            }
+                        }
                     }
                 }
             }
@@ -634,8 +659,8 @@ class MavRosNode : public rclcpp::Node {
         int mission_idx = -1;
         geometry_msgs::msg::Point cur_pos;
         geometry_msgs::msg::Point last_wp_pos;
-        int navi_status = SEARCH_STRUCT_CROSS;
-        int move_status = HOVER;
+        int navi_status = IDLE;
+        int move_status = IDLE;
         int intersect_confirm_cnt = 0;
         int yaw_adj_cd = 0;
         float tgt_yaw = 0;
@@ -646,7 +671,8 @@ class MavRosNode : public rclcpp::Node {
         float vert_line_p1u = 0;
         int64_t time_offset_ns = 0;
         float hori_line_angle = 0;
-        bool batt_rcved = false;
+        //bool batt_rcved = false;
+        bool local_pos_not_rcved = true;
         MyCircularBuffer<float, 5> hori_line_angles;
         MyCircularBuffer<float, 5> hori_line_x;
         MyCircularBuffer<float, 5> hori_line_z;
