@@ -27,7 +27,6 @@
 
 #define MY_COMP_ID 191
 
-
 #define SEARCH_STRUCT_CROSS 1
 #define PASS_STRUCT_CROSS 2
 #define IDLE 1000
@@ -38,6 +37,7 @@
 #define MOVE_LEFT 4
 #define LAND 5
 #define HOVER 6
+#define RTL 7
 
 #define END_OF_SHELF 1
 
@@ -494,6 +494,10 @@ class MavRosNode : public rclcpp::Node {
                         len = mavlink_msg_to_send_buffer(buf, &msg);
                         write(uart_fd_, buf, len);
                     }
+                } else if (move_status == RTL) {
+                    mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tp.tv_sec*1000+tp.tv_nsec/1000000, mav_sysid, 1, MAV_FRAME_LOCAL_NED, 0x0DF8, 0, 0, latest_posd, 0, 0, 0, 0, 0, 0, 0, 0);
+                    len = mavlink_msg_to_send_buffer(buf, &msg);
+                    write(uart_fd_, buf, len);
                 }
             }
         }
@@ -538,11 +542,13 @@ class MavRosNode : public rclcpp::Node {
                         if (hb.custom_mode == COPTER_MODE_GUIDED) {
                             if (mission_idx == -1) {
                                 RCLCPP_INFO(this->get_logger(), "move to shelves position");
+                                tgt_posn = missions[0][0] / 100.0f;
+                                tgt_pose = missions[0][1] / 100.0f;
                                 clock_gettime(CLOCK_MONOTONIC, &tp);
-                                mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tp.tv_sec*1000+tp.tv_nsec/1000000, mav_sysid, 1, MAV_FRAME_LOCAL_OFFSET_NED, 0x0DF8, 1.8f, -1.8f, -0.3f, 0, 0, 0, 0, 0, 0, 0, 0);
+                                mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tp.tv_sec*1000+tp.tv_nsec/1000000, mav_sysid, 1, MAV_FRAME_LOCAL_NED, 0x0DF8, tgt_posn, tgt_pose, latest_posd-0.3f, 0, 0, 0, 0, 0, 0, 0, 0);
                                 len = mavlink_msg_to_send_buffer(buf, &msg);
                                 write(uart_fd_, buf, len);
-                                mission_idx = 0;
+                                mission_idx = 1;
                                 navi_status = IDLE;
                                 move_status = IDLE;
                             }
@@ -560,7 +566,7 @@ class MavRosNode : public rclcpp::Node {
                             write(uart_fd_, buf, len);
                         }
                         if (local_pos_not_rcved) {
-                            mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, mav_sysid, 1, MAV_CMD_SET_MESSAGE_INTERVAL, 0, MAVLINK_MSG_ID_LOCAL_POSITION_NED, 1'000'000, 0, 0, 0, 0, 0);
+                            mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, mav_sysid, 1, MAV_CMD_SET_MESSAGE_INTERVAL, 0, MAVLINK_MSG_ID_LOCAL_POSITION_NED, 200'000, 0, 0, 0, 0, 0);
                             len = mavlink_msg_to_send_buffer(buf, &msg);
                             write(uart_fd_, buf, len);
                         }
@@ -634,9 +640,10 @@ class MavRosNode : public rclcpp::Node {
                         local_pos_not_rcved = false;
                         mavlink_local_position_ned_t pos;
                         mavlink_msg_local_position_ned_decode(&msg, &pos);
-                        if (mission_idx == 0 && navi_status == IDLE && move_status == IDLE) {
-                            float x_diff = pos.x - 1.8f;
-                            float y_diff = pos.y - (-1.8f);
+                        latest_posd = pos.z;
+                        if (mission_idx == 1 && navi_status == IDLE && move_status == IDLE) {
+                            float x_diff = pos.x - tgt_posn;
+                            float y_diff = pos.y - tgt_pose;
                             if (x_diff * x_diff + y_diff * y_diff <= 0.25f) {
                                 RCLCPP_INFO(this->get_logger(), "in position");
                                 navi_status = SEARCH_STRUCT_CROSS;
@@ -673,6 +680,9 @@ class MavRosNode : public rclcpp::Node {
         float hori_line_angle = 0;
         //bool batt_rcved = false;
         bool local_pos_not_rcved = true;
+        float latest_posd = 0;
+        float tgt_posn = 0;
+        float tgt_pose = 0;
         MyCircularBuffer<float, 5> hori_line_angles;
         MyCircularBuffer<float, 5> hori_line_x;
         MyCircularBuffer<float, 5> hori_line_z;
