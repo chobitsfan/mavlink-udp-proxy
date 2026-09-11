@@ -323,7 +323,7 @@ class MavRosNode : public rclcpp::Node {
                 } else if (navi_status == PASS_STRUCT_CROSS) {
                     float dy = cur_pos.y - last_wp_pos.y;
                     float dz = cur_pos.z - last_wp_pos.z;
-                    if (dy * dy + dz * dz > 1) {
+                    if (dy * dy + dz * dz > 0.6 * 0.6) {
                         RCLCPP_INFO(this->get_logger(), "intersection passed");
                         navi_status = SEARCH_STRUCT_CROSS;
                         mission_idx++;
@@ -662,7 +662,7 @@ class MavRosNode : public rclcpp::Node {
                                 RCLCPP_INFO(this->get_logger(), "in position");
                                 mission_idx = 2;
                                 navi_status = SEARCH_STRUCT_CROSS;
-                                move_status = MOVE_UP;
+                                move_status = HOVER;
                             }
                         } else if (move_status == RTL) {
                             if (pos.x * pos.x + pos.y * pos.y <= 0.25f) {
