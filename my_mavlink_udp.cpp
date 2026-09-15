@@ -553,8 +553,10 @@ class MavRosNode : public rclcpp::Node {
                                 move_status = TAKEOFF;
                                 navi_status = IDLE;
                             }
-                        } else {
+                        } else if (hb.custom_mode == COPTER_MODE_STABILIZE) {
                             mission_idx = -1;
+                            move_status = IDLE;
+                            navi_status = IDLE;
                         }
                         if (!att_rcved) {
                             mavlink_msg_command_long_pack(mav_sysid, MY_COMP_ID, &msg, mav_sysid, 1, MAV_CMD_SET_MESSAGE_INTERVAL, 0, MAVLINK_MSG_ID_ATTITUDE, 100'000, 0, 0, 0, 0, 0);
@@ -644,7 +646,7 @@ class MavRosNode : public rclcpp::Node {
                         latest_posd = pos.z;
                         if (move_status == TAKEOFF) {
                             if (fabsf(pos.z - tgt_posd) <= 0.1f) {
-                                RCLCPP_INFO(this->get_logger(), "move to position");
+                                RCLCPP_INFO(this->get_logger(), "takeoff complete, move to shelves");
                                 tgt_posn = missions[1][1] / 100.0f;
                                 tgt_pose = missions[1][2] / 100.0f;
                                 clock_gettime(CLOCK_MONOTONIC, &tp);
