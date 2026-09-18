@@ -47,6 +47,7 @@
 #define FAR_DIST_M 0.9f
 #define TAKEOFF_ALT_M 1.0f
 #define HORI_SPD 0.2f
+#define CROSS_PASS_DIST 0.7f
 
 using namespace std::chrono_literals;
 
@@ -323,7 +324,7 @@ class MavRosNode : public rclcpp::Node {
                 } else if (navi_status == PASS_STRUCT_CROSS) {
                     float dy = cur_pos.y - last_wp_pos.y;
                     float dz = cur_pos.z - last_wp_pos.z;
-                    if (dy * dy + dz * dz > 0.6 * 0.6) {
+                    if (dy * dy + dz * dz > CROSS_PASS_DIST * CROSS_PASS_DIST) {
                         RCLCPP_INFO(this->get_logger(), "intersection passed");
                         navi_status = SEARCH_STRUCT_CROSS;
                         mission_idx++;
