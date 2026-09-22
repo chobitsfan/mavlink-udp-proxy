@@ -47,7 +47,8 @@
 #define FAR_DIST_M 0.9f
 #define TAKEOFF_ALT_M 1.0f
 #define HORI_SPD 0.2f
-#define CROSS_PASS_DIST 0.7f
+#define CROSS_PASS_DIST 0.6f
+#define SHELVES_ALT_DIFF 1.5f
 
 using namespace std::chrono_literals;
 
@@ -94,7 +95,6 @@ class MavRosNode : public rclcpp::Node {
             //odom_cor_pub = this->create_publisher<nav_msgs::msg::Odometry>("odometry_corrected", rclcpp::QoS(1).best_effort().durability_volatile());
             wp_pub = this->create_publisher<visualization_msgs::msg::Marker>("waypoints", rclcpp::QoS(1).best_effort().durability_volatile());
             odom_sub = this->create_subscription<nav_msgs::msg::Odometry>("odometry", rclcpp::QoS(1).best_effort().durability_volatile(), std::bind(&MavRosNode::odom_callback, this, std::placeholders::_1));
-            intersec_sub = this->create_subscription<geometry_msgs::msg::Point>("templateCOG", 1, std::bind(&MavRosNode::intersect_callback, this, std::placeholders::_1));
             vert_hori_line_sub = this->create_subscription<geometry_msgs::msg::PolygonStamped>("vert_hori_line", 1, std::bind(&MavRosNode::vert_hori_line_callback, this, std::placeholders::_1));
             cmd_sub = this->create_subscription<std_msgs::msg::String>("cmd", rclcpp::QoS(1).best_effort().durability_volatile(), std::bind(&MavRosNode::cmd_callback, this, std::placeholders::_1));
             uart_timer = this->create_wall_timer(2ms, std::bind(&MavRosNode::timer_callback, this));
@@ -143,34 +143,6 @@ class MavRosNode : public rclcpp::Node {
             auto vel = odom_msg->twist.twist.linear;
             cur_pos = pos;
 
-#if 0
-            float heading = atan2f(2 * (ori.w * ori.z + ori.x * ori.y), 1 - 2 * (ori.y * ori.y + ori.z * ori.z));
-            //std::cout << heading * 180.0 / M_PI << " deg\n";
-            if (hori_line_angle != 0) {
-                //RCLCPP_WARN(this->get_logger(), "vio heading %f deg, shelf hori angle %f deg", heading * 180.0 / M_PI, hori_line_angle * 180.0 / M_PI);
-                Eigen::Quaternionf q_z(Eigen::AngleAxisf(hori_line_angle - heading, Eigen::Vector3f::UnitZ()));
-                Eigen::Quaternionf q_heading(1, ori.x, ori.y, ori.z);
-                Eigen::Quaternionf q_cor = q_z * q_heading;
-                q_cor.normalize();
-                //Eigen::Vector3f t_vio(pos.x, pos.y, pos.z);
-                //Eigen::Vector3f t_cor = q_cor * t_vio;
-                nav_msgs::msg::Odometry odom_cor;
-                odom_cor.header = odom_msg->header;
-                odom_cor.child_frame_id = "map";
-                //odom_cor.pose.pose.position.x = t_cor.x();
-                //odom_cor.pose.pose.position.y = t_cor.y();
-                //odom_cor.pose.pose.position.z = t_cor.z();
-                odom_cor.pose.pose.position = pos;
-                odom_cor.pose.pose.orientation.w = q_cor.w();
-                odom_cor.pose.pose.orientation.x = q_cor.x();
-                odom_cor.pose.pose.orientation.y = q_cor.y();
-                odom_cor.pose.pose.orientation.z = q_cor.z();
-                odom_cor.twist.twist.linear = vel;
-                odom_cor_pub->publish(odom_cor);
-                ori = odom_cor.pose.pose.orientation;
-            }
-#endif
-
             if (mav_sysid != 0 && time_offset_ns != 0) {
                 q[0] = ori.w;
                 q[1] = ori.x;
@@ -184,11 +156,6 @@ class MavRosNode : public rclcpp::Node {
                 len = mavlink_msg_to_send_buffer(buf, &msg);
                 write(uart_fd_, buf, len);
             }
-        }
-
-        void intersect_callback(const geometry_msgs::msg::Point::SharedPtr msg) {
-            //printf("intersection %f %f\n", msg->x, msg->y);
-            clock_gettime(CLOCK_MONOTONIC, &tp_intersect);
         }
 
         void vert_hori_line_callback(const geometry_msgs::msg::PolygonStamped::SharedPtr poly_msg) {
@@ -224,51 +191,24 @@ class MavRosNode : public rclcpp::Node {
             }
             //if (hori_p.x != 0) std::cout << "heading " << acosf(hori_v.y) * 180 / M_PI << " degrees\n";
 
-#if 0
-            // just for test
-            if (hori_p.x != 0) {
-                // find the intersection point of the hori struct line and the plane y = 0
-                float t = -hori_p.y / hori_v.y;
-                float z = hori_p.z + hori_v.z * t;
-                float x = hori_p.x + hori_v.x * t;
-                hori_line_z.push(z);
-                if (hori_line_z.full()) {
-                    auto zz = hori_line_z.data_copy();
-                    std::nth_element(zz.begin(), zz.begin() + 2, zz.end());
-                    float mid_z = zz[2];
-                    if (mid_z > 0.1f) {
-                        RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too low, move up");
-                    } else if (mid_z < -0.2f) {
-                        RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too high, move down");
-                    }
-                }
-            }
-            if (vert_p.x != 0) {
-                float t = -vert_p.z / vert_v.z;
-                float x = vert_p.x + vert_v.x * t;
-                float y = vert_p.y + vert_v.y * t;
-                vert_line_y.push(y);
-                if (vert_line_y.full()) {
-                    auto yy = vert_line_y.data_copy();
-                    std::nth_element(yy.begin(), yy.begin() + 2, yy.end());
-                    float mid_y = yy[2];
-                    if (mid_y > 0.2f) {
-                        RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too right, move left");
-                    } else if (mid_y < -0.2f) {
-                        RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too left, move right");
-                    }
-                }
-            }
-#endif
-
             if (yaw_adj_cd > 0) yaw_adj_cd--;
             if (mission_idx >= 0 && mission_idx < (int)missions.size()) {
                 if (navi_status == SEARCH_STRUCT_CROSS) {
-                    bool intersect_detected = ((tp.tv_sec - tp_intersect.tv_sec) * 1'000'000'000 + tp.tv_nsec - tp_intersect.tv_nsec) < 500'000'000;
+                    bool intersect_detected = false;
+                    if (missions[mission_idx][1] == END_OF_SHELF) {
+                        if (vert_p.x) {
+                            tp_vert = tp;
+                            int64_t td = (tp.tv_sec - tp_hori.tv_sec) * 1000000000LL + tp.tv_nsec - tp_hori.tv_nsec;
+                            intersect_detected = hori_p.x || td < 500000000;
+                        }
+                        if (!intersect_detected && hori_p.x) {
+                            tp_hori = tp;
+                            int64_t td = (tp.tv_sec - tp_vert.tv_sec) * 1000000000LL + tp.tv_nsec - tp_vert.tv_nsec;
+                            intersect_detected = vert_p.x || td < 500000000;
+                        }
+                    }
                     if (vert_p.x != 0 && hori_p.x != 0) intersect_confirm_cnt++; else intersect_confirm_cnt = 0;
-                    int cnt_needed = 2;
-                    if (missions[mission_idx][1] == END_OF_SHELF) cnt_needed = 0; // end of shelf, horizontal strcuture discontinued
-                    if (intersect_confirm_cnt > cnt_needed || intersect_detected) {
+                    if (intersect_confirm_cnt > 2 || intersect_detected) {
                         intersect_confirm_cnt = 0;
                         RCLCPP_INFO(this->get_logger(), "arrival at waypoint %d", mission_idx);
                         navi_status = PASS_STRUCT_CROSS;
@@ -361,10 +301,10 @@ class MavRosNode : public rclcpp::Node {
                                 auto zz = hori_line_z.data_copy();
                                 std::nth_element(zz.begin(), zz.begin() + 2, zz.end());
                                 float mid_z = zz[2];
-                                if (mid_z > 0.05f) {
+                                if (mid_z > 0.2f) {
                                     vel_d = -0.15f;
                                     RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too low, move up");
-                                } else if (mid_z < -0.2f) {
+                                } else if (mid_z < -0.1f) {
                                     vel_d = 0.1f;
                                     RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500, "too high, move down");
                                 }
@@ -387,7 +327,7 @@ class MavRosNode : public rclcpp::Node {
                                 RCLCPP_INFO_STREAM(this->get_logger(), "adjust heading " << (vx > 0 ? std::string("cw ") : std::string("ccw ")) <<  angle_y_hori * 180 / M_PI << " from " << cur_yaw * 180 / M_PI << " to " << tgt_yaw * 180 / M_PI);
                             }*/
                             if (fabsf(hori_line_angle) > 0.15f && yaw_adj_cd == 0) {
-                                if (hori_line_angle > 0.35f) hori_line_angle = 0.35f; else if (hori_line_angle < -0.35f) hori_line_angle = -0.35f;
+                                if (hori_line_angle > 0) hori_line_angle = 0.15f; else hori_line_angle = -0.15f;
                                 yaw_adj_cd = 30;
                                 tgt_yaw = cur_yaw + hori_line_angle;
                                 RCLCPP_INFO(this->get_logger(), "adjust heading from %f to %f", cur_yaw, tgt_yaw);
@@ -652,7 +592,7 @@ class MavRosNode : public rclcpp::Node {
                                 tgt_posn = missions[1][1] / 100.0f;
                                 tgt_pose = missions[1][2] / 100.0f;
                                 clock_gettime(CLOCK_MONOTONIC, &tp);
-                                mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tp.tv_sec*1000+tp.tv_nsec/1000000, mav_sysid, 1, MAV_FRAME_LOCAL_NED, 0x0DF8, tgt_posn, tgt_pose, pos.z-2.0f, 0, 0, 0, 0, 0, 0, 0, 0);
+                                mavlink_msg_set_position_target_local_ned_pack(mav_sysid, MY_COMP_ID, &msg, tp.tv_sec*1000+tp.tv_nsec/1000000, mav_sysid, 1, MAV_FRAME_LOCAL_NED, 0x0DF8, tgt_posn, tgt_pose, pos.z-SHELVES_ALT_DIFF, 0, 0, 0, 0, 0, 0, 0, 0);
                                 len = mavlink_msg_to_send_buffer(buf, &msg);
                                 write(uart_fd_, buf, len);
                                 mission_idx = 1;
@@ -687,7 +627,6 @@ class MavRosNode : public rclcpp::Node {
         int parse_error = 0;
         int packet_rx_drop_count = 0;
         uint8_t mav_sysid = 0;
-        struct timespec tp_intersect = {0, 0};
         bool att_rcved = false;
         float cur_yaw = 0;
         std::vector<std::array<int, 3>> missions;
@@ -712,6 +651,8 @@ class MavRosNode : public rclcpp::Node {
         float tgt_posn = 0;
         float tgt_pose = 0;
         float tgt_posd = 0;
+        struct timespec tp_vert = {0, 0};
+        struct timespec tp_hori = {0, 0};
         MyCircularBuffer<float, 5> hori_line_angles;
         MyCircularBuffer<float, 5> hori_line_x;
         MyCircularBuffer<float, 5> hori_line_z;
@@ -724,7 +665,6 @@ class MavRosNode : public rclcpp::Node {
         rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr vel_pub;
         //rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr is_armable_pub;
         //rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_cor_pub;
-        rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr intersec_sub;
         rclcpp::Subscription<geometry_msgs::msg::PolygonStamped>::SharedPtr vert_hori_line_sub;
         rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub;
         rclcpp::Subscription<std_msgs::msg::String>::SharedPtr cmd_sub;
